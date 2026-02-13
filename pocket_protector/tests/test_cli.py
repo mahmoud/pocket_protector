@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-
-from __future__ import unicode_literals
-
 import os
 import json
 import subprocess
@@ -17,13 +13,14 @@ def test_prepare():
     assert cli._get_cmd(prepare=True)
     return
 
+
 KURT_EMAIL = 'kurt@example.com'
-KURT_PHRASE = u'passphrasë'
+KURT_PHRASE = 'passphrasë'
 MH_EMAIL = 'mahmoud@hatnote.com'
 MH_PHRASE = 'thegame'
 DOMAIN_NAME = 'first-domain'
 SECRET_NAME = 'secret-name'
-SECRET_VALUE = u'secrët-value'
+SECRET_VALUE = 'secrët-value'
 
 
 
@@ -157,3 +154,24 @@ def test_main(tmp_path):
 
     res = subprocess.check_output(['pocket_protector', 'version'])
     assert res.decode('utf8').startswith('pocket_protector version')
+
+
+def test_cli_fast_crypto_flag(tmp_path, _fast_crypto):
+    """Test the --fast-crypto flag for init."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+
+    protected_path = str(tmp_path) + '/protected.yaml'
+
+    # Init with fast crypto
+    res = cc.run(f'pprotect init --file {protected_path} --fast-crypto',
+                 input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    assert os.path.exists(protected_path)
+
+    # Should still work - add domain, add secret, decrypt
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc2.run(['pprotect', 'add-domain'], input=['dev'])
+    cc2.run(['pprotect', 'add-secret'], input=['dev', 'key1', 'val1'])
+    res = cc2.run(['pprotect', 'decrypt-domain', 'dev'])
+    assert json.loads(res.stdout)['key1'] == 'val1'

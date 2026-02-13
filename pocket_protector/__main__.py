@@ -1,12 +1,18 @@
 import os
 import sys
 
-from .cli import main
+from .cli import main as _main
 
-if __name__ == '__main__':  # pragma: no cover
+
+def main():
     try:
-        sys.exit(main() or 0)
+        sys.exit(_main() or 0)
     except Exception:
         if os.getenv('PPROTECT_ENABLE_DEBUG'):
-            import pdb;pdb.post_mortem()
+            import pdb
+            pdb.post_mortem()
         raise
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pocket-protector"
+version = "24.0.0dev"
+description = "Handy secret management system with a convenient CLI and readable storage format."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+authors = [
+    {name = "Kurt Rose", email = "kurt@kurtrose.com"},
+    {name = "Mahmoud Hashemi"},
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "attrs",
+    "boltons",
+    "PyNaCl",
+    "ruamel.yaml",
+    "schema",
+    "face>=24.0.0",
+]
+
+[project.scripts]
+pprotect = "pocket_protector.__main__:main"
+pocket_protector = "pocket_protector.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/SimpleLegal/pocket_protector"
+
+[tool.pytest.ini_options]
+testpaths = ["pocket_protector/tests"]

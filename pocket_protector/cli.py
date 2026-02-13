@@ -23,20 +23,6 @@ _ANSI_RESET_ALL = '\x1b[0m'
 # TODO: custodian-signed values. allow custodians to sign values
 # added/set by others, then produced reports on which secrets have been
 # updated/changed but not signed yet. enables a review/audit mechanism.
-
-try:
-    unicode
-except NameError:
-    # py3
-    unicode = str
-
-
-def _get_text(inp):
-    if not isinstance(inp, unicode):
-        return inp.decode('utf8')
-    return inp
-
-
 def _create_protected(path):
     if os.path.exists(path):
         raise UsageError('Protected file already exists: %s' % path, 2)
@@ -117,7 +103,7 @@ def _get_creds(kf,
             passphrase = prompt.secret('Passphrase: ', confirm=False)
             passphrase_source = 'stdin'
 
-    creds = Creds(_get_text(user or ''), _get_text(passphrase or ''),
+    creds = Creds(user or '', passphrase or '',
                   name_source=user_source, passphrase_source=passphrase_source)
     _check_creds(kf, creds)
 
@@ -162,6 +148,8 @@ def _get_cmd(prepare=False):
             doc="the acting user's email credential")
     cmd.add('--passphrase-file',
             doc='path to a file containing only the passphrase, likely provided by a deployment system')
+    cmd.add('--fast-crypto', parse_as=True,
+            doc='use faster (less secure) KDF parameters, suitable for development')
 
     # add middlewares, outermost first ("first added, first called")
     cmd.add(mw_verify_creds)
@@ -213,10 +201,13 @@ def main(argv=None):  # pragma: no cover  (see note in tests.test_cli.test_main)
 The following subcommand handlers all update/write to a protected file (wkf).
 """
 
-def add_key_custodian(wkf):
+def add_key_custodian(wkf, fast_crypto=None):
     'add a new key custodian to the protected'
     echo('Adding new key custodian.')
     creds = _get_new_creds()
+    if fast_crypto:
+        from .file_keys import KDF_INTERACTIVE
+        return wkf.add_key_custodian(creds, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
     return wkf.add_key_custodian(creds)
 
 

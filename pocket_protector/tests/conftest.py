@@ -15,4 +15,3 @@ def _fast_crypto():
 
     pocket_protector.file_keys.OPSLIMIT = old_opslimit
     pocket_protector.file_keys.MEMLIMIT = old_memlimit
-    return

@@ -48,3 +48,4 @@ nosetests.xml
 *.sw[op]
 
 .cache/
+.venv/

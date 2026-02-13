@@ -10,10 +10,8 @@ import base64
 import collections
 import datetime
 import hashlib
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from io import StringIO
+import struct
+from io import StringIO
 
 import attr
 import nacl.utils
@@ -24,11 +22,6 @@ import schema
 import ruamel.yaml
 from boltons.dictutils import OMD
 from boltons.fileutils import atomic_save
-
-try:
-    unicode = unicode
-except NameError:
-    unicode = str  # py3
 
 
 _VALID_NAME_RE = re.compile(r"^[A-z][-_A-z0-9]*\Z")
@@ -71,20 +64,25 @@ _FILE_SCHEMA = schema.Schema(_as_d(
 }))
 
 
-OPSLIMIT = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE
-MEMLIMIT = nacl.pwhash.argon2id.MEMLIMIT_MODERATE
+# KDF difficulty levels (opslimit, memlimit)
+KDF_SENSITIVE = (nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE, nacl.pwhash.argon2id.MEMLIMIT_MODERATE)  # ~0.8s, 256MB - production default
+KDF_INTERACTIVE = (nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE, nacl.pwhash.argon2id.MEMLIMIT_INTERACTIVE)  # ~0.1s, 64MB - dev/testing
+
+# Keep module-level defaults for backward compat (v0 custodians use these)
+OPSLIMIT = KDF_SENSITIVE[0]
+MEMLIMIT = KDF_SENSITIVE[1]
 
 # NOTE: this is a public class since it must be passed in
 @attr.s(frozen=True)
 class Creds(object):
     "Stores credentials used to open a KeyFile"
-    name = attr.ib(validator=attr.validators.instance_of(unicode))
-    passphrase = attr.ib(validator=attr.validators.instance_of(unicode))
+    name = attr.ib(validator=attr.validators.instance_of(str))
+    passphrase = attr.ib(validator=attr.validators.instance_of(str))
     name_source = attr.ib(default=None)
     passphrase_source = attr.ib(default=None)
 
 
-def _kdf(creds, salt):
+def _kdf(creds, salt, opslimit=None, memlimit=None):
     name = creds.name.encode('utf8')
     passphrase = creds.passphrase.encode('utf8')
 
@@ -94,8 +92,8 @@ def _kdf(creds, salt):
     return nacl.pwhash.argon2id.kdf(
         nacl.public.PrivateKey.SIZE,
         valet_key, hashlib.sha512(salt + name).digest()[:16],
-        opslimit=OPSLIMIT,
-        memlimit=MEMLIMIT)
+        opslimit=opslimit if opslimit is not None else OPSLIMIT,
+        memlimit=memlimit if memlimit is not None else MEMLIMIT)
 
 
 def _decode(b64):
@@ -128,6 +126,8 @@ class _KeyCustodian(object):
     name = attr.ib()
     _public_key = attr.ib()
     _salt = attr.ib()
+    _opslimit = attr.ib(default=None)
+    _memlimit = attr.ib(default=None)
 
     def encrypt_for(self, bytes):
         'encrypt the passed bytes so that this key-custodian can decrypt'
@@ -137,27 +137,55 @@ class _KeyCustodian(object):
         'decrypt the passed bytes that were encrypted for this key-custodian'
         assert creds.name == self.name
         return nacl.public.SealedBox(
-            nacl.public.PrivateKey(_kdf(creds, self._salt))).decrypt(bytes)
+            nacl.public.PrivateKey(_kdf(creds, self._salt,
+                                       opslimit=self._opslimit,
+                                       memlimit=self._memlimit))).decrypt(bytes)
 
     @classmethod
-    def from_creds(cls, creds):
+    def from_creds(cls, creds, opslimit=None, memlimit=None):
         'create a new user based on new credentials'
         salt = os.urandom(8)
-        private_key = nacl.public.PrivateKey(_kdf(creds, salt))
+        private_key = nacl.public.PrivateKey(_kdf(creds, salt,
+                                                  opslimit=opslimit,
+                                                  memlimit=memlimit))
         return cls(
-            name=creds.name, public_key=private_key.public_key, salt=salt)
+            name=creds.name, public_key=private_key.public_key, salt=salt,
+            opslimit=opslimit, memlimit=memlimit)
 
     @classmethod
     def from_data(cls, name, data):
         # password derived key material
-        pwdkm = _decode(data['pwdkm'])
-        salt, public_key = pwdkm[:8], pwdkm[8:8 + nacl.public.PublicKey.SIZE]
-        return cls(
-            name=name, public_key=nacl.public.PublicKey(public_key), salt=salt)
+        raw = base64.b64decode(data['pwdkm'])
+        version = raw[0]
+        if version == 0:
+            # v0: version(1) + salt(8) + pubkey(32)
+            payload = raw[1:]
+            salt, public_key = payload[:8], payload[8:8 + nacl.public.PublicKey.SIZE]
+            return cls(
+                name=name, public_key=nacl.public.PublicKey(public_key),
+                salt=salt, opslimit=None, memlimit=None)
+        elif version == 1:
+            # v1: version(1) + opslimit(4 LE) + memlimit(4 LE) + salt(8) + pubkey(32)
+            opslimit, memlimit = struct.unpack_from('<II', raw, 1)
+            payload = raw[9:]
+            salt, public_key = payload[:8], payload[8:8 + nacl.public.PublicKey.SIZE]
+            return cls(
+                name=name, public_key=nacl.public.PublicKey(public_key),
+                salt=salt, opslimit=opslimit, memlimit=memlimit)
+        else:
+            raise PPError('unsupported pwdkm version %s' % version)
 
     def as_data(self):
+        if self._opslimit is not None and self._memlimit is not None:
+            # v1 format
+            raw = (b'\x01'
+                   + struct.pack('<II', self._opslimit, self._memlimit)
+                   + self._salt + self._public_key.encode())
+        else:
+            # v0 format (backward compat)
+            raw = b'\x00' + self._salt + self._public_key.encode()
         return {
-            'pwdkm': _encode(self._salt + self._public_key.encode()),
+            'pwdkm': base64.b64encode(raw).decode('utf8'),
         }
 
 
@@ -522,12 +550,12 @@ class KeyFile(object):
             log=self._new_log('removed owner {} from {}',
                 key_custodian_name, domain_name))
 
-    def add_key_custodian(self, creds):
+    def add_key_custodian(self, creds, opslimit=None, memlimit=None):
         key_custodians = dict(self._key_custodians)
         if creds.name in key_custodians:
             raise PPError(
                 'tried to add key custodian that already exists: {}'.format(creds.name))
-        key_custodians[creds.name] = _KeyCustodian.from_creds(creds)
+        key_custodians[creds.name] = _KeyCustodian.from_creds(creds, opslimit=opslimit, memlimit=memlimit)
         return attr.evolve(
             self, key_custodians=key_custodians,
             log=self._new_log('created key custodian {}', creds.name))
