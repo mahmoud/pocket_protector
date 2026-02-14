@@ -330,3 +330,120 @@ def test_raw_key_invalid_passphrase(_fast_crypto):
     bad_creds = file_keys.Creds('user@example.com', 'regular-password')
     with pytest.raises(file_keys.PPError):
         _KeyCustodian.from_raw_creds(bad_creds)
+
+import base64
+
+
+def test_decode_unsupported_version(_fast_crypto):
+    """Test that _decode() raises PPError for non-zero version byte."""
+    from pocket_protector.file_keys import _decode
+    bad_b64 = base64.b64encode(b'\x05' + b'some payload').decode('utf8')
+    with pytest.raises(file_keys.PPError, match='not supported'):
+        _decode(bad_b64)
+
+
+def test_custodian_from_data_unsupported_version(_fast_crypto):
+    """Test _KeyCustodian.from_data with unknown version byte."""
+    from pocket_protector.file_keys import _KeyCustodian
+    raw = b'\x63' + b'\x00' * 40
+    encoded = base64.b64encode(raw).decode('utf8')
+    with pytest.raises(file_keys.PPError, match='unsupported'):
+        _KeyCustodian.from_data('user@example.com', {'pwdkm': encoded})
+
+
+def test_decrypt_domain_non_owner(_fast_crypto):
+    """Test that decrypt_domain raises PPError for non-owner."""
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    alice = file_keys.Creds('alice@example.com', 'alice-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)
+    kf = kf.add_key_custodian(alice)
+    kf = kf.add_domain('domain', bob.name)  # only bob is owner
+    kf = kf.set_secret('domain', 'key', 'val')
+    with pytest.raises(file_keys.PPError, match='not an owner'):
+        kf.decrypt_domain('domain', alice)
+
+
+def test_rm_owner_not_an_owner(_fast_crypto):
+    """Test rm_owner raises PPError when custodian is not an owner."""
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)
+    kf = kf.add_domain('domain', bob.name)
+    with pytest.raises(file_keys.PPError, match='not an owner'):
+        kf.rm_owner('domain', 'nonexistent@example.com')
+
+
+def test_rm_owner_last_owner(_fast_crypto):
+    """Test rm_owner raises PPError when removing the last owner."""
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)
+    kf = kf.add_domain('domain', bob.name)
+    with pytest.raises(file_keys.PPError, match='irretrievable'):
+        kf.rm_owner('domain', bob.name)
+
+
+def test_key_domain_missing_secret(_fast_crypto):
+    """Test _KeyDomain raises PPKeyError on missing key."""
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)
+    kf = kf.add_domain('domain', bob.name)
+    kf = kf.set_secret('domain', 'exists', 'val')
+    decrypted = kf.decrypt_domain('domain', bob)
+    with pytest.raises(file_keys.PPKeyError, match='no secret'):
+        decrypted['nonexistent']
+
+
+def test_add_raw_key_custodian_duplicate(_fast_crypto):
+    """Test add_raw_key_custodian raises PPError for duplicate email."""
+    from pocket_protector.file_keys import generate_raw_passphrase
+    passphrase = generate_raw_passphrase()
+    creds = file_keys.Creds('raw@example.com', passphrase)
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_raw_key_custodian(creds)
+    with pytest.raises(file_keys.PPError, match='already exists'):
+        kf.add_raw_key_custodian(creds)
+
+
+def test_rekey_custodian_name_mismatch(_fast_crypto):
+    """Test rekey_custodian raises PPError when names differ."""
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    alice = file_keys.Creds('alice@example.com', 'alice-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)
+    with pytest.raises(file_keys.PPError, match='same custodian name'):
+        kf.rekey_custodian(bob, alice)
+
+
+def test_rekey_custodian_kdf(_fast_crypto):
+    """Test rekey_custodian with raw_key=False (KDF path)."""
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)
+    kf = kf.add_domain('domain', bob.name)
+    kf = kf.set_secret('domain', 'key', 'val')
+    new_bob = file_keys.Creds('bob@example.com', 'new-bob-pass')
+    kf = kf.rekey_custodian(bob, new_bob, raw_key=False)
+    assert kf.decrypt_domain('domain', new_bob)['key'] == 'val'
+    assert kf.check_creds(new_bob)
+    assert not kf.check_creds(bob)
+
+
+def test_truncate_audit_log_no_op(_fast_crypto):
+    """Test truncate_audit_log returns same object when log is short."""
+    creds = file_keys.Creds('user@example.com', 'pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(creds)
+    # kf has 2 log entries (create + add_key_custodian)
+    result = kf.truncate_audit_log(100)
+    assert result is kf

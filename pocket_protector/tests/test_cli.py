@@ -316,3 +316,185 @@ def test_cli_rekey_custodian(tmp_path, _fast_crypto):
     cc_raw = CommandChecker(cmd, chdir=str(tmp_path), env=raw_env, reraise=True)
     res = cc_raw.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
     assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_cli_invalid_key_type(tmp_path, _fast_crypto):
+    """Test that --key-type with an invalid value fails."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    res = cc.fail('pprotect init --file %s --key-type bogus' % protected_path,
+                  input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    assert 'key-type' in res.stderr.lower() or 'hard' in res.stderr.lower()
+
+
+def test_cli_passphrase_file_not_found(tmp_path, _fast_crypto):
+    """Test that a nonexistent passphrase file gives a clear error."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    cc = CommandChecker(cmd, chdir=str(tmp_path), reraise=True)
+    res = cc.fail('pprotect decrypt-domain --non-interactive --passphrase-file /nonexistent/path first-domain',
+                  env={'PPROTECT_USER': KURT_EMAIL})
+    assert 'passphrase' in res.stderr.lower() and 'file' in res.stderr.lower()
+
+
+def test_cli_list_domains_empty(tmp_path, _fast_crypto):
+    """Test list-domains with no domains shows message on stderr."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    cc = CommandChecker(cmd, chdir=str(tmp_path), reraise=True)
+    res = cc.run('pprotect list-domains')
+    assert 'No domains' in res.stderr
+
+
+def test_cli_list_domain_secrets_empty(tmp_path, _fast_crypto):
+    """Test list-domain-secrets with no secrets shows message on stderr."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    res = cc.run(['pprotect', 'list-domain-secrets', DOMAIN_NAME])
+    assert 'No secrets' in res.stderr
+
+
+def test_cli_list_all_secrets_empty(tmp_path, _fast_crypto):
+    """Test list-all-secrets with no secrets shows message on stderr."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    res = cc.run('pprotect list-all-secrets')
+    assert 'No secrets' in res.stderr
+
+
+def test_cli_set_passphrase_fast(tmp_path, _fast_crypto):
+    """Test set-key-custodian-passphrase with --key-type fast."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    new_phrase = KURT_PHRASE + '_new'
+    cc.run('pprotect set-key-custodian-passphrase --key-type fast',
+           input=[KURT_EMAIL, KURT_PHRASE, new_phrase, new_phrase])
+    # Verify decrypt works with new passphrase
+    new_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': new_phrase}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=new_env, reraise=True)
+    res = cc2.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_cli_rekey_custodian_fast(tmp_path, _fast_crypto):
+    """Test rekey-custodian --key-type fast."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    new_phrase = KURT_PHRASE + '_fast'
+    cc.run('pprotect rekey-custodian --key-type fast',
+           input=[KURT_EMAIL, KURT_PHRASE, new_phrase, new_phrase])
+    new_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': new_phrase}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=new_env, reraise=True)
+    res = cc2.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_cli_rekey_custodian_hard(tmp_path, _fast_crypto):
+    """Test rekey-custodian --key-type hard."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    new_phrase = KURT_PHRASE + '_hard'
+    cc.run('pprotect rekey-custodian --key-type hard',
+           input=[KURT_EMAIL, KURT_PHRASE, new_phrase, new_phrase])
+    new_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': new_phrase}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=new_env, reraise=True)
+    res = cc2.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_cli_rekey_custodian_abort(tmp_path, _fast_crypto):
+    """Test rekey-custodian --key-type raw abort when user types 'no'."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    # Rekey to raw but decline confirmation
+    res = cc.run('pprotect rekey-custodian --key-type raw',
+                 input=[KURT_EMAIL, KURT_PHRASE, 'no'])
+    assert 'Aborting' in res.stdout
+    # Old passphrase should still work
+    res = cc.run(['pprotect', 'list-domains'])
+    # No crash means old creds still valid
+
+
+def test_cli_migrate_owner_no_domains(tmp_path, _fast_crypto):
+    """Test migrate-owner when the user owns no domains."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    # Add MH as custodian
+    cc.run('pprotect add-key-custodian', input=[MH_EMAIL, MH_PHRASE, MH_PHRASE])
+    # MH owns no domains, try migrate-owner as MH
+    mh_env = {'PPROTECT_USER': MH_EMAIL, 'PPROTECT_PASSPHRASE': MH_PHRASE}
+    cc_mh = CommandChecker(cmd, chdir=str(tmp_path), env=mh_env, reraise=True)
+    res = cc_mh.run('pprotect migrate-owner', input=[KURT_EMAIL])
+    assert 'do not own any domains' in res.stdout.lower()
+
+
+def test_cli_migrate_owner_abort(tmp_path, _fast_crypto):
+    """Test migrate-owner abort when user types 'n' at confirm."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run('pprotect add-key-custodian', input=[MH_EMAIL, MH_PHRASE, MH_PHRASE])
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    # Abort migrate-owner
+    res = cc.run('pprotect migrate-owner', input=[MH_EMAIL, 'n'])
+    assert 'Aborting' in res.stdout
+    # Domain should still be owned by kurt, not MH
+    mh_env = {'PPROTECT_USER': MH_EMAIL, 'PPROTECT_PASSPHRASE': MH_PHRASE}
+    cc_mh = CommandChecker(cmd, chdir=str(tmp_path), env=mh_env, reraise=True)
+    # MH should not be owner - list-user-secrets should show no domains
+    res = cc_mh.run('pprotect list-user-secrets')
+    assert 'does not own any domains' in res.stderr
