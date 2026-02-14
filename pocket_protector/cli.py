@@ -174,6 +174,9 @@ def _get_cmd(prepare=False):
     cmd.add(set_key_custodian_passphrase)
     cmd.add(rotate_domain_keys)
 
+    cmd.add(migrate_owner)
+    cmd.add(list_user_secrets)
+
     cmd.add(decrypt_domain, posargs={'count': 1, 'provides': 'domain_name'})
 
     cmd.add(list_domains)
@@ -268,13 +271,16 @@ def rm_secret(wkf):
     return wkf.rm_secret(domain_name, secret_name)
 
 
-def set_key_custodian_passphrase(wkf):
+def set_key_custodian_passphrase(wkf, fast_crypto=None):
     'update a key custodian passphrase'
     user_id = prompt('User email: ')
     passphrase = prompt.secret('Current passphrase: ')
     creds = Creds(user_id, passphrase)
     _check_creds(wkf, creds)
     new_passphrase = prompt.secret('New passphrase: ', confirm=True)
+    if fast_crypto:
+        from .file_keys import KDF_INTERACTIVE
+        return wkf.set_key_custodian_passphrase(creds, new_passphrase, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
     return wkf.set_key_custodian_passphrase(creds, new_passphrase)
 
 
@@ -282,6 +288,21 @@ def rotate_domain_keys(wkf, creds):
     'rotate the internal encryption keys for a given domain'
     domain_name = prompt('Domain name: ')
     return wkf.rotate_domain_key(domain_name, creds)
+
+
+def migrate_owner(wkf, creds):
+    'grant a custodian ownership of all domains you own'
+    new_owner = prompt('New owner email: ')
+    owned = wkf.get_custodian_domains(creds.name)
+    if not owned:
+        echo('You do not own any domains.')
+        return None
+    echo('Will add %s as owner to: %s' % (new_owner, ', '.join(sorted(owned))))
+    confirm = prompt('Proceed? [y/N] ')
+    if not confirm.lower().startswith('y'):
+        echo('Aborting.')
+        return None
+    return wkf.migrate_owner(new_owner, creds)
 
 
 """
@@ -338,6 +359,18 @@ def list_audit_log(kf):
     'print a list of actions from the audit log, one per line'
     log_list = kf.get_audit_log()
     echo('\n'.join(log_list))
+    return
+
+
+def list_user_secrets(kf, creds):
+    'display domains and secrets accessible to the authenticated user'
+    owned = kf.get_custodian_domains(creds.name)
+    if not owned:
+        echo.err('User %s does not own any domains.' % creds.name)
+        return
+    for domain_name in sorted(owned):
+        secrets = kf.get_domain_secret_names(domain_name)
+        echo('%s: %s' % (domain_name, ', '.join(secrets) if secrets else '(no secrets)'))
     return
 
 

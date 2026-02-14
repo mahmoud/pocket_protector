@@ -175,3 +175,75 @@ def test_error_cases(_fast_crypto):
     # Invalid secret name
     with pytest.raises(ValueError):
         kf.set_secret('d', '$invalid', 'val')
+
+
+def test_set_passphrase_with_kdf_params(_fast_crypto):
+    """Test set_key_custodian_passphrase with explicit KDF params."""
+    from pocket_protector.file_keys import KDF_INTERACTIVE
+    bob = file_keys.Creds('bob@example.com', 'secret1')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)  # v0 custodian
+    kf = kf.add_domain('prod', bob.name)
+    kf = kf.set_secret('prod', 'db-pass', 'hunter2')
+    # Change passphrase with explicit KDF params
+    new_pass = 'new-secret1'
+    kf = kf.set_key_custodian_passphrase(
+        bob, new_pass,
+        opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
+    # Verify decrypt works with new passphrase
+    new_bob = file_keys.Creds('bob@example.com', new_pass)
+    assert kf.decrypt_domain('prod', new_bob)['db-pass'] == 'hunter2'
+    # Round-trip through file
+    kf.write()
+    kf2 = file_keys.KeyFile.from_file(tmp.name)
+    assert kf2 == kf
+    assert kf2.decrypt_domain('prod', new_bob)['db-pass'] == 'hunter2'
+
+
+def test_get_custodian_domains(_fast_crypto):
+    """Test get_custodian_domains returns correct domain lists."""
+    alice = file_keys.Creds('alice@example.com', 'alice-pass')
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(alice)
+    kf = kf.add_key_custodian(bob)
+    # Alice owns both domains
+    kf = kf.add_domain('domain1', alice.name)
+    kf = kf.add_domain('domain2', alice.name)
+    # Bob owns only domain1
+    kf = kf.add_owner('domain1', bob.name, alice)
+    alice_domains = kf.get_custodian_domains(alice.name)
+    bob_domains = kf.get_custodian_domains(bob.name)
+    assert sorted(alice_domains) == ['domain1', 'domain2']
+    assert sorted(bob_domains) == ['domain1']
+
+
+def test_migrate_owner(_fast_crypto):
+    """Test migrate_owner transfers ownership across all domains."""
+    alice = file_keys.Creds('alice@example.com', 'alice-pass')
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(alice)
+    kf = kf.add_key_custodian(bob)
+    # Alice owns three domains with secrets
+    for d in ('d1', 'd2', 'd3'):
+        kf = kf.add_domain(d, alice.name)
+        kf = kf.set_secret(d, 'key', 'val-' + d)
+    # Migrate ownership to bob
+    kf = kf.migrate_owner(bob.name, alice)
+    # Bob should now own all three
+    assert sorted(kf.get_custodian_domains(bob.name)) == ['d1', 'd2', 'd3']
+    # Bob can decrypt all three
+    for d in ('d1', 'd2', 'd3'):
+        assert kf.decrypt_domain(d, bob)['key'] == 'val-' + d
+    # Error: nonexistent new custodian
+    with pytest.raises(Exception):
+        kf.migrate_owner('nobody@example.com', alice)
+    # Error: user with no domains
+    carol = file_keys.Creds('carol@example.com', 'carol-pass')
+    kf2 = kf.add_key_custodian(carol)
+    with pytest.raises(Exception):
+        kf2.migrate_owner(bob.name, carol)

@@ -579,8 +579,8 @@ class KeyFile(object):
         return self._domains[domain_name].get_decrypted(
             self._key_custodians[creds.name], creds)
 
-    def set_key_custodian_passphrase(self, creds, new_passphrase):
-        new_kc = _KeyCustodian.from_creds(Creds(creds.name, new_passphrase))
+    def set_key_custodian_passphrase(self, creds, new_passphrase, opslimit=None, memlimit=None):
+        new_kc = _KeyCustodian.from_creds(Creds(creds.name, new_passphrase), opslimit=opslimit, memlimit=memlimit)
         cur_kc = self._key_custodians[creds.name]
         key_custodians = dict(self._key_custodians)
         key_custodians[creds.name] = new_kc
@@ -595,8 +595,9 @@ class KeyFile(object):
         return attr.evolve(
             self, key_custodians=key_custodians, domains=domains,
             log=self._new_log(
-                'updated key custodian passphrase for {} (updated domains -> {})',
-                    creds.name, ", ".join(updated)))
+                'updated key custodian passphrase for {} (updated domains -> {}){}',
+                    creds.name, ", ".join(updated),
+                    ' (custom KDF params)' if (opslimit or memlimit) else ''))
 
     def check_creds(self, creds):
         try:
@@ -608,6 +609,24 @@ class KeyFile(object):
         except Exception:  # TODO: what crypto error?
             return False
         return True
+
+    def get_custodian_domains(self, key_custodian_name):
+        '''Return list of domain names where key_custodian_name is an owner.'''
+        return [name for name, domain in self._domains.items()
+                if key_custodian_name in domain.get_owner_names()]
+
+    def migrate_owner(self, new_custodian_name, creds, domain_names=None):
+        '''Add new_custodian_name as owner to all (or specified) domains owned by creds user.'''
+        if new_custodian_name not in self._key_custodians:
+            raise PPError('no key custodian named %s' % new_custodian_name)
+        if domain_names is None:
+            domain_names = self.get_custodian_domains(creds.name)
+        if not domain_names:
+            raise PPError('%s does not own any domains' % creds.name)
+        result = self
+        for domain_name in domain_names:
+            result = result.add_owner(domain_name, new_custodian_name, creds)
+        return result
 
     def rotate_domain_key(self, domain_name, creds):
         '''

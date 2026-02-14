@@ -175,3 +175,60 @@ def test_cli_fast_crypto_flag(tmp_path, _fast_crypto):
     cc2.run(['pprotect', 'add-secret'], input=['dev', 'key1', 'val1'])
     res = cc2.run(['pprotect', 'decrypt-domain', 'dev'])
     assert json.loads(res.stdout)['key1'] == 'val1'
+
+
+def test_cli_migrate_owner(tmp_path, _fast_crypto):
+    """Test the migrate-owner CLI subcommand."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+
+    # Init with kurt
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+
+    # Add MH as custodian
+    cc.run('pprotect add-key-custodian', input=[MH_EMAIL, MH_PHRASE, MH_PHRASE])
+
+    # Add two domains owned by kurt, with secrets
+    cc.run(['pprotect', 'add-domain'], input=['dom1'])
+    cc.run(['pprotect', 'add-domain'], input=['dom2'])
+    cc.run(['pprotect', 'add-secret'], input=['dom1', 'key1', 'val1'])
+    cc.run(['pprotect', 'add-secret'], input=['dom2', 'key2', 'val2'])
+
+    # Migrate ownership to MH
+    cc.run('pprotect migrate-owner', input=[MH_EMAIL, 'y'])
+
+    # MH should now be able to decrypt both domains
+    mh_env = {'PPROTECT_USER': MH_EMAIL, 'PPROTECT_PASSPHRASE': MH_PHRASE}
+    cc_mh = CommandChecker(cmd, chdir=str(tmp_path), env=mh_env, reraise=True)
+    res = cc_mh.run(['pprotect', 'decrypt-domain', 'dom1'])
+    assert json.loads(res.stdout)['key1'] == 'val1'
+    res = cc_mh.run(['pprotect', 'decrypt-domain', 'dom2'])
+    assert json.loads(res.stdout)['key2'] == 'val2'
+
+
+def test_cli_list_user_secrets(tmp_path, _fast_crypto):
+    """Test the list-user-secrets CLI subcommand."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+
+    # Init with kurt
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+
+    # Add domain and secret
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    # List user secrets
+    res = cc.run('pprotect list-user-secrets')
+    assert DOMAIN_NAME in res.stdout
+    assert SECRET_NAME in res.stdout
