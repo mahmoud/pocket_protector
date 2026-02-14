@@ -640,6 +640,21 @@ class KeyFile(object):
 
     def set_key_custodian_passphrase(self, creds, new_passphrase, opslimit=None, memlimit=None):
         new_kc = _KeyCustodian.from_creds(Creds(creds.name, new_passphrase), opslimit=opslimit, memlimit=memlimit)
+        return self._replace_key_custodian(creds, new_kc, 'updated key custodian passphrase')
+
+    def rekey_custodian(self, creds, new_creds, raw_key=False, opslimit=None, memlimit=None):
+        '''Replace a custodian's key material entirely (new passphrase, new KDF type).
+        The custodian name (email) must match between creds and new_creds.'''
+        if creds.name != new_creds.name:
+            raise PPError('rekey requires same custodian name, got %s and %s' % (creds.name, new_creds.name))
+        if raw_key:
+            new_kc = _KeyCustodian.from_raw_creds(new_creds)
+        else:
+            new_kc = _KeyCustodian.from_creds(new_creds, opslimit=opslimit, memlimit=memlimit)
+        return self._replace_key_custodian(creds, new_kc, 'rekeyed custodian')
+
+    def _replace_key_custodian(self, creds, new_kc, log_action):
+        '''Internal: replace a custodian's key material and re-encrypt domain ownership.'''
         cur_kc = self._key_custodians[creds.name]
         key_custodians = dict(self._key_custodians)
         key_custodians[creds.name] = new_kc
@@ -654,9 +669,8 @@ class KeyFile(object):
         return attr.evolve(
             self, key_custodians=key_custodians, domains=domains,
             log=self._new_log(
-                'updated key custodian passphrase for {} (updated domains -> {}){}',
-                    creds.name, ", ".join(updated),
-                    ' (custom KDF params)' if (opslimit or memlimit) else ''))
+                '{} for {} (updated domains -> {})',
+                    log_action, creds.name, ', '.join(updated)))
 
     def check_creds(self, creds):
         try:

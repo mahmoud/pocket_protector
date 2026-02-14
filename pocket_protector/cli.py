@@ -148,8 +148,8 @@ def _get_cmd(prepare=False):
             doc="the acting user's email credential")
     cmd.add('--passphrase-file',
             doc='path to a file containing only the passphrase, likely provided by a deployment system')
-    cmd.add('--fast-crypto', parse_as=True,
-            doc='use faster (less secure) KDF parameters, suitable for development')
+    cmd.add('--key-type',
+            doc='custodian key type: hard (default, slow KDF), fast (quick KDF), or raw (no KDF, generated key)')
 
     # add middlewares, outermost first ("first added, first called")
     cmd.add(mw_verify_creds)
@@ -160,7 +160,7 @@ def _get_cmd(prepare=False):
     # add subcommands
     cmd.add(add_key_custodian, name='init', doc='create a new protected')
     cmd.add(add_key_custodian)
-    cmd.add(add_raw_key_custodian)
+    cmd.add(rekey_custodian)
 
     cmd.add(add_domain)
     cmd.add(rm_domain)
@@ -205,21 +205,17 @@ def main(argv=None):  # pragma: no cover  (see note in tests.test_cli.test_main)
 The following subcommand handlers all update/write to a protected file (wkf).
 """
 
-def add_key_custodian(wkf, fast_crypto=None):
-    'add a new key custodian to the protected'
-    echo('Adding new key custodian.')
-    creds = _get_new_creds()
-    if fast_crypto:
-        from .file_keys import KDF_INTERACTIVE
-        return wkf.add_key_custodian(creds, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
-    return wkf.add_key_custodian(creds)
+_KEY_TYPES = ('hard', 'fast', 'raw')
 
 
-def add_raw_key_custodian(wkf):
-    'add a key custodian with a generated raw key (no KDF, instant auth)'
-    from .file_keys import generate_raw_passphrase
-    user_id = prompt('User email: ')
-    passphrase = generate_raw_passphrase()
+def _validate_key_type(key_type):
+    if key_type and key_type not in _KEY_TYPES:
+        raise UsageError('--key-type must be one of: %s' % ', '.join(_KEY_TYPES))
+    return key_type
+
+
+def _show_raw_key_and_confirm(passphrase):
+    '''Display a generated raw key and require YES confirmation. Returns True if confirmed.'''
     echo('')
     echo('=' * 72)
     echo('  GENERATED RAW KEY (copy this now, it will not be shown again):')
@@ -231,11 +227,26 @@ def add_raw_key_custodian(wkf):
     echo('=' * 72)
     echo('')
     confirm = prompt('Have you saved the key? Type YES to confirm: ')
-    if confirm.strip() != 'YES':
-        echo('Aborting. Key was not confirmed.')
-        return None
-    creds = Creds(user_id, passphrase)
-    return wkf.add_raw_key_custodian(creds)
+    return confirm.strip() == 'YES'
+
+
+def add_key_custodian(wkf, key_type=None):
+    'add a new key custodian to the protected'
+    from .file_keys import KDF_INTERACTIVE, generate_raw_passphrase
+    key_type = _validate_key_type(key_type)
+    echo('Adding new key custodian.')
+    if key_type == 'raw':
+        user_id = prompt('User email: ')
+        passphrase = generate_raw_passphrase()
+        if not _show_raw_key_and_confirm(passphrase):
+            echo('Aborting. Key was not confirmed.')
+            return None
+        creds = Creds(user_id, passphrase)
+        return wkf.add_raw_key_custodian(creds)
+    creds = _get_new_creds()
+    if key_type == 'fast':
+        return wkf.add_key_custodian(creds, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
+    return wkf.add_key_custodian(creds)
 
 
 def add_domain(wkf, creds):
@@ -295,17 +306,40 @@ def rm_secret(wkf):
     return wkf.rm_secret(domain_name, secret_name)
 
 
-def set_key_custodian_passphrase(wkf, fast_crypto=None):
+def set_key_custodian_passphrase(wkf, key_type=None):
     'update a key custodian passphrase'
+    from .file_keys import KDF_INTERACTIVE
+    key_type = _validate_key_type(key_type)
     user_id = prompt('User email: ')
     passphrase = prompt.secret('Current passphrase: ')
     creds = Creds(user_id, passphrase)
     _check_creds(wkf, creds)
     new_passphrase = prompt.secret('New passphrase: ', confirm=True)
-    if fast_crypto:
-        from .file_keys import KDF_INTERACTIVE
+    if key_type == 'fast':
         return wkf.set_key_custodian_passphrase(creds, new_passphrase, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
     return wkf.set_key_custodian_passphrase(creds, new_passphrase)
+
+
+def rekey_custodian(wkf, key_type=None):
+    'change a custodian key type (hard/fast/raw) and passphrase, re-encrypting all owned domains'
+    from .file_keys import KDF_INTERACTIVE, generate_raw_passphrase
+    key_type = _validate_key_type(key_type) or 'hard'
+    user_id = prompt('User email: ')
+    passphrase = prompt.secret('Current passphrase: ')
+    creds = Creds(user_id, passphrase)
+    _check_creds(wkf, creds)
+    if key_type == 'raw':
+        new_passphrase = generate_raw_passphrase()
+        if not _show_raw_key_and_confirm(new_passphrase):
+            echo('Aborting. Key was not confirmed.')
+            return None
+        new_creds = Creds(creds.name, new_passphrase)
+        return wkf.rekey_custodian(creds, new_creds, raw_key=True)
+    new_passphrase = prompt.secret('New passphrase: ', confirm=True)
+    new_creds = Creds(creds.name, new_passphrase)
+    if key_type == 'fast':
+        return wkf.rekey_custodian(creds, new_creds, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
+    return wkf.rekey_custodian(creds, new_creds)
 
 
 def rotate_domain_keys(wkf, creds):
