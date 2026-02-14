@@ -68,6 +68,11 @@ _FILE_SCHEMA = schema.Schema(_as_d(
 KDF_SENSITIVE = (nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE, nacl.pwhash.argon2id.MEMLIMIT_MODERATE)  # ~0.8s, 256MB - production default
 KDF_INTERACTIVE = (nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE, nacl.pwhash.argon2id.MEMLIMIT_INTERACTIVE)  # ~0.1s, 64MB - dev/testing
 
+# Raw key passphrase format: P<64 hex chars>P
+# When passphrase has sufficient entropy, KDF can be bypassed entirely.
+_RAW_KEY_RE = re.compile(r'^P([0-9a-f]{64})P$')
+KDF_RAW_KEY = 'raw'  # sentinel for raw-key custodians
+
 # Keep module-level defaults for backward compat (v0 custodians use these)
 OPSLIMIT = KDF_SENSITIVE[0]
 MEMLIMIT = KDF_SENSITIVE[1]
@@ -94,6 +99,24 @@ def _kdf(creds, salt, opslimit=None, memlimit=None):
         valet_key, hashlib.sha512(salt + name).digest()[:16],
         opslimit=opslimit if opslimit is not None else OPSLIMIT,
         memlimit=memlimit if memlimit is not None else MEMLIMIT)
+
+
+def _kdf_raw(creds, salt):
+    '''Derive key directly from high-entropy passphrase (P<64hex>P format).
+    No argon2 — the passphrase IS the entropy.'''
+    name = creds.name.encode('utf8')
+    passphrase = creds.passphrase.encode('utf8')
+    return hashlib.sha512(passphrase + salt + name).digest()[:nacl.public.PrivateKey.SIZE]
+
+
+def generate_raw_passphrase():
+    '''Generate a P<64hex>P raw-key passphrase with 256 bits of entropy.'''
+    return 'P' + os.urandom(32).hex() + 'P'
+
+
+def is_raw_passphrase(passphrase):
+    '''Check if passphrase matches the P<64hex>P raw-key format.'''
+    return bool(_RAW_KEY_RE.match(passphrase))
 
 
 def _decode(b64):
@@ -128,6 +151,7 @@ class _KeyCustodian(object):
     _salt = attr.ib()
     _opslimit = attr.ib(default=None)
     _memlimit = attr.ib(default=None)
+    _raw_key = attr.ib(default=False)
 
     def encrypt_for(self, bytes):
         'encrypt the passed bytes so that this key-custodian can decrypt'
@@ -136,10 +160,14 @@ class _KeyCustodian(object):
     def decrypt_as(self, creds, bytes):
         'decrypt the passed bytes that were encrypted for this key-custodian'
         assert creds.name == self.name
+        if self._raw_key:
+            key_bytes = _kdf_raw(creds, self._salt)
+        else:
+            key_bytes = _kdf(creds, self._salt,
+                             opslimit=self._opslimit,
+                             memlimit=self._memlimit)
         return nacl.public.SealedBox(
-            nacl.public.PrivateKey(_kdf(creds, self._salt,
-                                       opslimit=self._opslimit,
-                                       memlimit=self._memlimit))).decrypt(bytes)
+            nacl.public.PrivateKey(key_bytes)).decrypt(bytes)
 
     @classmethod
     def from_creds(cls, creds, opslimit=None, memlimit=None):
@@ -150,7 +178,17 @@ class _KeyCustodian(object):
                                                   memlimit=memlimit))
         return cls(
             name=creds.name, public_key=private_key.public_key, salt=salt,
-            opslimit=opslimit, memlimit=memlimit)
+            opslimit=opslimit, memlimit=memlimit, raw_key=False)
+    @classmethod
+    def from_raw_creds(cls, creds):
+        'create a new user from a raw-key (P<64hex>P) passphrase'
+        if not is_raw_passphrase(creds.passphrase):
+            raise PPError('raw-key passphrase must match P<64 hex chars>P format')
+        salt = os.urandom(8)
+        private_key = nacl.public.PrivateKey(_kdf_raw(creds, salt))
+        return cls(
+            name=creds.name, public_key=private_key.public_key, salt=salt,
+            opslimit=None, memlimit=None, raw_key=True)
 
     @classmethod
     def from_data(cls, name, data):
@@ -171,12 +209,22 @@ class _KeyCustodian(object):
             salt, public_key = payload[:8], payload[8:8 + nacl.public.PublicKey.SIZE]
             return cls(
                 name=name, public_key=nacl.public.PublicKey(public_key),
-                salt=salt, opslimit=opslimit, memlimit=memlimit)
+                salt=salt, opslimit=opslimit, memlimit=memlimit, raw_key=False)
+        elif version == 2:
+            # v2: version(1) + salt(8) + pubkey(32) - raw key, no argon2
+            payload = raw[1:]
+            salt, public_key = payload[:8], payload[8:8 + nacl.public.PublicKey.SIZE]
+            return cls(
+                name=name, public_key=nacl.public.PublicKey(public_key),
+                salt=salt, opslimit=None, memlimit=None, raw_key=True)
         else:
             raise PPError('unsupported pwdkm version %s' % version)
 
     def as_data(self):
-        if self._opslimit is not None and self._memlimit is not None:
+        if self._raw_key:
+            # v2 format
+            raw = b'\x02' + self._salt + self._public_key.encode()
+        elif self._opslimit is not None and self._memlimit is not None:
             # v1 format
             raw = (b'\x01'
                    + struct.pack('<II', self._opslimit, self._memlimit)
@@ -559,6 +607,17 @@ class KeyFile(object):
         return attr.evolve(
             self, key_custodians=key_custodians,
             log=self._new_log('created key custodian {}', creds.name))
+
+    def add_raw_key_custodian(self, creds):
+        'add a key custodian using a raw-key (P<64hex>P) passphrase, no KDF'
+        key_custodians = dict(self._key_custodians)
+        if creds.name in key_custodians:
+            raise PPError(
+                'tried to add key custodian that already exists: {}'.format(creds.name))
+        key_custodians[creds.name] = _KeyCustodian.from_raw_creds(creds)
+        return attr.evolve(
+            self, key_custodians=key_custodians,
+            log=self._new_log('created raw-key custodian {}', creds.name))
 
     def rm_key_custodian(self, key_custodian_name):
         'remove key custodian and all domain ownerships'

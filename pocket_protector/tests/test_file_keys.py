@@ -247,3 +247,86 @@ def test_migrate_owner(_fast_crypto):
     kf2 = kf.add_key_custodian(carol)
     with pytest.raises(Exception):
         kf2.migrate_owner(bob.name, carol)
+
+
+def test_raw_key_custodian(_fast_crypto):
+    """Test raw-key (v2) custodian creation, encrypt/decrypt, and round-trip."""
+    from pocket_protector.file_keys import generate_raw_passphrase, is_raw_passphrase, _KeyCustodian
+    passphrase = generate_raw_passphrase()
+    assert is_raw_passphrase(passphrase)
+    assert not is_raw_passphrase('notarawkey')
+    assert not is_raw_passphrase('P1234P')  # too short
+
+    creds = file_keys.Creds('rawuser@example.com', passphrase)
+    kc = _KeyCustodian.from_raw_creds(creds)
+    # Round-trip through data
+    data = kc.as_data()
+    kc2 = _KeyCustodian.from_data(creds.name, data)
+    assert kc2._raw_key is True
+    # Encrypt/decrypt
+    enc = kc.encrypt_for(b'secret-data')
+    dec = kc2.decrypt_as(creds, enc)
+    assert dec == b'secret-data'
+
+
+def test_raw_key_in_keyfile(_fast_crypto):
+    """Test raw-key custodian works end-to-end in a KeyFile."""
+    from pocket_protector.file_keys import generate_raw_passphrase
+    passphrase = generate_raw_passphrase()
+    raw_creds = file_keys.Creds('raw@example.com', passphrase)
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(bob)  # v0
+    kf = kf.add_raw_key_custodian(raw_creds)  # v2
+    kf = kf.add_domain('dev', bob.name)
+    kf = kf.add_owner('dev', raw_creds.name, bob)
+    kf = kf.set_secret('dev', 'db_pass', 'hunter2')
+
+    # Both can decrypt
+    assert kf.decrypt_domain('dev', bob)['db_pass'] == 'hunter2'
+    assert kf.decrypt_domain('dev', raw_creds)['db_pass'] == 'hunter2'
+
+    # Round-trip through file
+    kf.write()
+    kf2 = file_keys.KeyFile.from_file(tmp.name)
+    assert kf2 == kf
+    assert kf2.decrypt_domain('dev', raw_creds)['db_pass'] == 'hunter2'
+    assert kf2.check_creds(raw_creds)
+    assert kf2.check_creds(bob)
+
+
+def test_v0_v1_v2_coexistence(_fast_crypto):
+    """Test all three custodian versions coexist in one KeyFile."""
+    from pocket_protector.file_keys import KDF_INTERACTIVE, generate_raw_passphrase
+    v0_creds = file_keys.Creds('v0@example.com', 'pass0')
+    v1_creds = file_keys.Creds('v1@example.com', 'pass1')
+    raw_pass = generate_raw_passphrase()
+    v2_creds = file_keys.Creds('v2@example.com', raw_pass)
+
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    kf = kf.add_key_custodian(v0_creds)
+    kf = kf.add_key_custodian(v1_creds, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
+    kf = kf.add_raw_key_custodian(v2_creds)
+
+    kf = kf.add_domain('shared', v0_creds.name)
+    kf = kf.add_owner('shared', v1_creds.name, v0_creds)
+    kf = kf.add_owner('shared', v2_creds.name, v0_creds)
+    kf = kf.set_secret('shared', 'token', 'abc123')
+
+    kf.write()
+    kf2 = file_keys.KeyFile.from_file(tmp.name)
+    assert kf2 == kf
+    for c in (v0_creds, v1_creds, v2_creds):
+        assert kf2.decrypt_domain('shared', c)['token'] == 'abc123'
+        assert kf2.check_creds(c)
+
+
+def test_raw_key_invalid_passphrase(_fast_crypto):
+    """Test that from_raw_creds rejects non-raw passphrases."""
+    from pocket_protector.file_keys import _KeyCustodian
+    bad_creds = file_keys.Creds('user@example.com', 'regular-password')
+    with pytest.raises(file_keys.PPError):
+        _KeyCustodian.from_raw_creds(bad_creds)

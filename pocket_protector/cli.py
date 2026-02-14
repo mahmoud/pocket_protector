@@ -160,6 +160,7 @@ def _get_cmd(prepare=False):
     # add subcommands
     cmd.add(add_key_custodian, name='init', doc='create a new protected')
     cmd.add(add_key_custodian)
+    cmd.add(add_raw_key_custodian)
 
     cmd.add(add_domain)
     cmd.add(rm_domain)
@@ -212,6 +213,29 @@ def add_key_custodian(wkf, fast_crypto=None):
         from .file_keys import KDF_INTERACTIVE
         return wkf.add_key_custodian(creds, opslimit=KDF_INTERACTIVE[0], memlimit=KDF_INTERACTIVE[1])
     return wkf.add_key_custodian(creds)
+
+
+def add_raw_key_custodian(wkf):
+    'add a key custodian with a generated raw key (no KDF, instant auth)'
+    from .file_keys import generate_raw_passphrase
+    user_id = prompt('User email: ')
+    passphrase = generate_raw_passphrase()
+    echo('')
+    echo('=' * 72)
+    echo('  GENERATED RAW KEY (copy this now, it will not be shown again):')
+    echo('')
+    echo('  ' + passphrase)
+    echo('')
+    echo('  Store this key securely. It is your passphrase.')
+    echo('  LOSS OF THIS KEY MEANS LOSS OF CUSTODIAN ACCESS.')
+    echo('=' * 72)
+    echo('')
+    confirm = prompt('Have you saved the key? Type YES to confirm: ')
+    if confirm.strip() != 'YES':
+        echo('Aborting. Key was not confirmed.')
+        return None
+    creds = Creds(user_id, passphrase)
+    return wkf.add_raw_key_custodian(creds)
 
 
 def add_domain(wkf, creds):

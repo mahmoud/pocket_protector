@@ -232,3 +232,62 @@ def test_cli_list_user_secrets(tmp_path, _fast_crypto):
     res = cc.run('pprotect list-user-secrets')
     assert DOMAIN_NAME in res.stdout
     assert SECRET_NAME in res.stdout
+
+
+def test_cli_add_raw_key_custodian(tmp_path, _fast_crypto):
+    """Test the add-raw-key-custodian CLI subcommand."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+
+    # Init with kurt (normal custodian)
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+
+    # Add a domain and secret first
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    # Add raw-key custodian ("YES" confirms key was saved)
+    res = cc.run('pprotect add-raw-key-custodian', input=['raw@example.com', 'YES'])
+    # Output should contain the generated key
+    assert 'GENERATED RAW KEY' in res.stdout
+    # Extract the key from output
+    import re
+    match = re.search(r'(P[0-9a-f]{64}P)', res.stdout)
+    assert match, 'Expected raw key in output'
+    raw_passphrase = match.group(1)
+
+    # Add raw custodian as owner
+    cc.run(['pprotect', 'add-owner'], input=[DOMAIN_NAME, 'raw@example.com'])
+
+    # Raw custodian should be able to decrypt
+    raw_env = {'PPROTECT_USER': 'raw@example.com', 'PPROTECT_PASSPHRASE': raw_passphrase}
+    cc_raw = CommandChecker(cmd, chdir=str(tmp_path), env=raw_env, reraise=True)
+    res = cc_raw.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_cli_add_raw_key_custodian_abort(tmp_path, _fast_crypto):
+    """Test that declining confirmation aborts without creating custodian."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+
+    # Type "no" instead of "YES" - should abort
+    res = cc.run('pprotect add-raw-key-custodian', input=['raw@example.com', 'no'])
+    assert 'Aborting' in res.stdout
+
+    # Custodian should not exist - add-owner should fail
+    import ruamel.yaml
+    data = ruamel.yaml.YAML().load(open(str(tmp_path) + '/protected.yaml').read())
+    assert 'raw@example.com' not in data['key-custodians']
