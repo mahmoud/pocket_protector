@@ -498,3 +498,372 @@ def test_cli_migrate_owner_abort(tmp_path, _fast_crypto):
     # MH should not be owner - list-user-secrets should show no domains
     res = cc_mh.run('pprotect list-user-secrets')
     assert 'does not own any domains' in res.stderr
+
+
+def test_decrypt_domain_format_env(tmp_path, _fast_crypto):
+    """Test --output-format env produces dotenv-style output."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'DB_PASS', 'my secret'])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'API_KEY', 'key123'])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'env', DOMAIN_NAME])
+    lines = res.stdout.strip().splitlines()
+    assert len(lines) == 2
+    # sorted by name: API_KEY before DB_PASS
+    assert lines[0] == 'API_KEY="key123"'
+    assert lines[1] == 'DB_PASS="my secret"'
+
+
+def test_decrypt_domain_format_shell(tmp_path, _fast_crypto):
+    """Test --output-format shell produces eval-able export lines."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'DB_PASS', 'val with spaces'])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'shell', DOMAIN_NAME])
+    lines = res.stdout.strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0] == 'export DB_PASS="val with spaces"'
+
+
+def test_decrypt_domain_format_env_special_chars(tmp_path, _fast_crypto):
+    """Test env format correctly escapes quotes and backslashes in values."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'TRICKY', 'has"quotes\\and=equals'])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'env', DOMAIN_NAME])
+    # Value should have " escaped to \" and \\ escaped to \\\\
+    assert res.stdout.strip() == 'TRICKY="has\\"quotes\\\\and=equals"'
+
+
+def test_decrypt_domain_format_env_invalid_name_warns(tmp_path, _fast_crypto):
+    """Test that secret names that aren't valid shell identifiers produce a warning."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'has-hyphens', 'val'])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'env', DOMAIN_NAME])
+    assert 'warning' in res.stderr.lower()
+    assert 'has-hyphens' in res.stderr
+    # Still outputs the value despite the warning
+    assert 'has-hyphens="val"' in res.stdout
+
+
+def test_decrypt_domain_secret_raw(tmp_path, _fast_crypto):
+    """Test --secret without --output-format outputs raw value."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--secret', SECRET_NAME, DOMAIN_NAME])
+    # Raw value, no JSON wrapping, no trailing newline from json.dumps
+    assert res.stdout.strip() == SECRET_VALUE
+
+
+def test_decrypt_domain_secret_json(tmp_path, _fast_crypto):
+    """Test --secret with --output-format json outputs single-key JSON."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'json',
+                  '--secret', SECRET_NAME, DOMAIN_NAME])
+    data = json.loads(res.stdout)
+    assert data == {SECRET_NAME: SECRET_VALUE}
+
+
+def test_decrypt_domain_secret_shell(tmp_path, _fast_crypto):
+    """Test --secret with --output-format shell outputs single export line."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'shell',
+                  '--secret', SECRET_NAME, DOMAIN_NAME])
+    assert res.stdout.strip() == 'export %s="%s"' % (SECRET_NAME, SECRET_VALUE)
+
+
+def test_decrypt_domain_secret_not_found(tmp_path, _fast_crypto):
+    """Test --secret with a nonexistent name fails with clear error."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    res = cc.fail_1(['pprotect', 'decrypt-domain', '--secret', 'nonexistent', DOMAIN_NAME])
+    assert 'not found' in res.stderr
+
+
+def test_decrypt_domain_format_invalid(tmp_path, _fast_crypto):
+    """Test --output-format with an invalid value fails."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+
+    res = cc.fail_1(['pprotect', 'decrypt-domain', '--output-format', 'xml', DOMAIN_NAME])
+    assert 'output-format' in res.stderr.lower()
+
+
+# --- Phase 3: exec subcommand tests ---
+
+
+def test_build_exec_env_basic():
+    """Test _build_exec_env injects secrets into a base env."""
+    base = {'PATH': '/usr/bin', 'HOME': '/home/user', 'OTHER': 'val'}
+    secrets = {'DB_PASS': 's3cret', 'API_KEY': 'key123'}
+    result = cli._build_exec_env(secrets, base_env=base)
+    assert result['DB_PASS'] == 's3cret'
+    assert result['API_KEY'] == 'key123'
+    assert result['PATH'] == '/usr/bin'
+    assert result['OTHER'] == 'val'  # passthrough by default
+
+
+def test_build_exec_env_scrubs_credentials():
+    """Test that PPROTECT_PASSPHRASE and PPROTECT_USER are always scrubbed."""
+    base = {'PATH': '/usr/bin', 'PPROTECT_PASSPHRASE': 'leaked', 'PPROTECT_USER': 'leaked@user'}
+    secrets = {'DB_PASS': 'ok'}
+    result = cli._build_exec_env(secrets, base_env=base)
+    assert 'PPROTECT_PASSPHRASE' not in result
+    assert 'PPROTECT_USER' not in result
+    assert result['DB_PASS'] == 'ok'
+    assert result['PATH'] == '/usr/bin'
+
+
+def test_build_exec_env_no_passthrough():
+    """Test --no-passthrough produces minimal env with only system vars + secrets."""
+    base = {
+        'PATH': '/usr/bin',
+        'HOME': '/home/user',
+        'TERM': 'xterm',
+        'LANG': 'en_US.UTF-8',
+        'AWS_SECRET_KEY': 'should_not_appear',
+        'PPROTECT_PASSPHRASE': 'also_scrubbed',
+    }
+    secrets = {'DB_PASS': 's3cret'}
+    result = cli._build_exec_env(secrets, no_passthrough=True, base_env=base)
+    assert result['DB_PASS'] == 's3cret'
+    assert result['PATH'] == '/usr/bin'
+    assert result['HOME'] == '/home/user'
+    assert result['TERM'] == 'xterm'
+    assert result['LANG'] == 'en_US.UTF-8'
+    assert 'AWS_SECRET_KEY' not in result
+    assert 'PPROTECT_PASSPHRASE' not in result
+
+
+def test_build_exec_env_prefix():
+    """Test --prefix prepends to secret names."""
+    secrets = {'DB_PASS': 'val'}
+    result = cli._build_exec_env(secrets, prefix='MYAPP', base_env={})
+    assert 'MYAPP_DB_PASS' in result
+    assert 'DB_PASS' not in result
+
+
+def test_build_exec_env_uppercase():
+    """Test --uppercase converts secret names."""
+    secrets = {'db-pass': 'val', 'api.key': 'val2'}
+    result = cli._build_exec_env(secrets, uppercase=True, base_env={})
+    assert 'DB_PASS' in result
+    assert 'API_KEY' in result
+    assert 'db-pass' not in result
+
+
+def test_build_exec_env_prefix_and_uppercase():
+    """Test --prefix and --uppercase combined."""
+    secrets = {'db-pass': 'val'}
+    result = cli._build_exec_env(secrets, prefix='APP', uppercase=True, base_env={})
+    assert 'APP_DB_PASS' in result
+
+
+def test_build_exec_env_collision():
+    """Test that name collisions after transformation raise UsageError."""
+    from face import UsageError
+    import pytest
+    # 'db-pass' and 'db_pass' both map to 'DB_PASS' when uppercased
+    secrets = {'db-pass': 'val1', 'db_pass': 'val2'}
+    with pytest.raises(UsageError, match='collision'):
+        cli._build_exec_env(secrets, uppercase=True, base_env={})
+
+
+def test_transform_secret_name():
+    """Test _transform_secret_name with various inputs."""
+    assert cli._transform_secret_name('DB_PASS') == 'DB_PASS'
+    assert cli._transform_secret_name('db-pass', uppercase=True) == 'DB_PASS'
+    assert cli._transform_secret_name('db.key', uppercase=True) == 'DB_KEY'
+    assert cli._transform_secret_name('KEY', prefix='APP') == 'APP_KEY'
+    assert cli._transform_secret_name('my-key', prefix='X', uppercase=True) == 'X_MY_KEY'
+
+
+def test_exec_missing_domain(tmp_path, _fast_crypto):
+    """Test exec without --domain fails with clear error."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    res = cc.fail_1(['pprotect', 'exec', '--', 'echo', 'hello'])
+    assert 'domain' in res.stderr.lower()
+
+
+def test_exec_missing_command(tmp_path, _fast_crypto):
+    """Test exec without a command after -- fails with clear error."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    res = cc.fail_1(['pprotect', 'exec', '--domain', DOMAIN_NAME])
+    assert 'command' in res.stderr.lower()
+
+
+def test_exec_subprocess_integration(tmp_path, _fast_crypto):
+    """Integration test: exec injects secrets and scrubs credentials via subprocess."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s --key-type fast' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    # Run pprotect exec via subprocess, using a python one-liner to dump env
+    env = dict(os.environ)
+    env['PPROTECT_USER'] = KURT_EMAIL
+    env['PPROTECT_PASSPHRASE'] = KURT_PHRASE
+    result = subprocess.run(
+        ['pprotect', 'exec', '--non-interactive',
+         '--domain', DOMAIN_NAME,
+         '--file', protected_path,
+         '--', 'python3', '-c',
+         'import os, json; print(json.dumps(dict(os.environ)))'],
+        capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert result.returncode == 0, 'stderr: %s' % result.stderr
+    child_env = json.loads(result.stdout)
+    # Secret should be in child env
+    assert child_env[SECRET_NAME] == SECRET_VALUE
+    # Credentials should NOT be in child env
+    assert 'PPROTECT_PASSPHRASE' not in child_env
+    assert 'PPROTECT_USER' not in child_env
+
+
+def test_exec_subprocess_no_passthrough(tmp_path, _fast_crypto):
+    """Integration test: --no-passthrough produces minimal env."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s --key-type fast' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    env = dict(os.environ)
+    env['PPROTECT_USER'] = KURT_EMAIL
+    env['PPROTECT_PASSPHRASE'] = KURT_PHRASE
+    env['SHOULD_NOT_APPEAR'] = 'leaked'
+    result = subprocess.run(
+        ['pprotect', 'exec', '--non-interactive',
+         '--domain', DOMAIN_NAME,
+         '--no-passthrough',
+         '--file', protected_path,
+         '--', 'python3', '-c',
+         'import os, json; print(json.dumps(dict(os.environ)))'],
+        capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert result.returncode == 0, 'stderr: %s' % result.stderr
+    child_env = json.loads(result.stdout)
+    assert child_env[SECRET_NAME] == SECRET_VALUE
+    assert 'SHOULD_NOT_APPEAR' not in child_env
+    assert 'PPROTECT_PASSPHRASE' not in child_env
+    # PATH should still be present
+    assert 'PATH' in child_env
+
+
+def test_exec_subprocess_prefix_uppercase(tmp_path, _fast_crypto):
+    """Integration test: --prefix and --uppercase transform secret names."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s --key-type fast' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'db-pass', 'myval'])
+
+    env = dict(os.environ)
+    env['PPROTECT_USER'] = KURT_EMAIL
+    env['PPROTECT_PASSPHRASE'] = KURT_PHRASE
+    result = subprocess.run(
+        ['pprotect', 'exec', '--non-interactive',
+         '--domain', DOMAIN_NAME,
+         '--prefix', 'MYAPP', '--uppercase',
+         '--file', protected_path,
+         '--', 'python3', '-c',
+         'import os, json; print(json.dumps(dict(os.environ)))'],
+        capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert result.returncode == 0, 'stderr: %s' % result.stderr
+    child_env = json.loads(result.stdout)
+    assert child_env['MYAPP_DB_PASS'] == 'myval'
+    assert 'db-pass' not in child_env

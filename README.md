@@ -141,7 +141,92 @@ Commands:
   set-key-custodian-passphrase
                         change a key custodian passphrase
   update-secret         update an existing secret in a specified domain
+  exec                  run a command with decrypted secrets injected as
+                        environment variables
 ```
+
+
+## Agent & Automation Security
+
+Pocket Protector is commonly used in CI/CD pipelines and increasingly
+alongside AI coding agents. In these contexts, secret hygiene matters
+more than usual -- any process with shell access can read environment
+variables, `cat .env`, or inspect `/proc/*/environ`.
+
+### Credential injection: from safest to weakest
+
+1. **`pprotect exec`** (recommended) -- decrypts a domain and injects
+   secrets as env vars into a child process. The custodian passphrase
+   is scrubbed from the child environment. Secrets exist only in the
+   child process memory, never on disk or in the parent env.
+
+   ```sh
+   pprotect exec --domain prod -- ./myapp --flag arg
+   ```
+
+2. **`--passphrase-file`** from a restricted mount -- store the
+   passphrase on a tmpfs or Docker secret mount with `0400`
+   permissions. Keeps the passphrase off the command line and out of
+   the process environment.
+
+   ```sh
+   pprotect decrypt-domain prod --passphrase-file /run/secrets/pp_pass
+   ```
+
+3. **`--key-type raw` custodian** -- generates a 256-bit machine key
+   with no KDF. Suitable for service accounts scoped to specific
+   domains. Store the raw key in a platform keychain or HSM.
+
+4. **`PPROTECT_PASSPHRASE` env var** -- the simplest option but the
+   weakest. Readable by any subprocess, including AI agents, build
+   scripts, and debug tooling. Use only when other options are not
+   available.
+
+### Output formats for `decrypt-domain`
+
+`decrypt-domain` supports `--format json` (default), `--format env`
+(dotenv-style), and `--format shell` (`eval`-able exports). Use
+`--secret SECRET_NAME` to extract a single value.
+
+```sh
+# JSON (default)
+pprotect decrypt-domain prod
+
+# .env format
+pprotect decrypt-domain prod --format env
+
+# Shell export format
+eval $(pprotect decrypt-domain prod --format shell)
+
+# Single secret, raw value
+DB_PASS=$(pprotect decrypt-domain prod --secret DB_PASS)
+```
+
+### What Pocket Protector is not
+
+Pocket Protector manages **static deploy-time secrets** -- database
+passwords, API keys, TLS certificates. It is not a runtime credential
+manager. For dynamic credentials (OAuth tokens, short-lived sessions,
+PKCE flows), use a runtime credential manager alongside Pocket
+Protector.
+
+Other explicit non-goals:
+
+* **Network daemon / SaaS mode** -- serverless is the value prop
+* **Time-limited credentials** -- no clock-based expiry; use
+  `pprotect exec` to limit secret lifetime to a process
+* **Per-secret access control** -- domains are the access boundary
+* **MCP server mode** -- use `pprotect exec` to inject secrets into
+  MCP server processes at startup
+
+### Security note on `pprotect exec`
+
+An agent or process that can run arbitrary commands could call
+`pprotect decrypt-domain` directly. `exec` reduces *accidental*
+exposure (logged output, env dumps, process listings), not adversarial
+exfiltration by a fully compromised agent. Defense in depth still
+applies: restrict filesystem access, use scoped custodians, and audit
+the protected.yaml change log.
 
 
 ## Design

@@ -7,6 +7,7 @@ People-centric secret management system, built to work with modern distributed v
 # Note that the doc above is part of "pprotect -h" output, add to it wisely.
 
 import os
+import re
 import sys
 import json
 import difflib
@@ -150,6 +151,18 @@ def _get_cmd(prepare=False):
             doc='path to a file containing only the passphrase, likely provided by a deployment system')
     cmd.add('--key-type',
             doc='custodian key type: hard (default, slow KDF), fast (quick KDF), or raw (no KDF, generated key)')
+    cmd.add('--output-format',
+            doc='output format for decrypt-domain: json (default), env, or shell')
+    cmd.add('--secret',
+            doc='decrypt a single secret by name (decrypt-domain only)')
+    cmd.add('--domain',
+            doc='domain name (used by exec subcommand)')
+    cmd.add('--prefix',
+            doc='prefix to prepend to secret env var names (exec only)')
+    cmd.add('--uppercase', parse_as=True,
+            doc='convert secret names to UPPER_CASE env var names (exec only)')
+    cmd.add('--no-passthrough', parse_as=True,
+            doc='exec with clean env: secrets + PATH/HOME/TERM/LANG only')
 
     # add middlewares, outermost first ("first added, first called")
     cmd.add(mw_verify_creds)
@@ -179,6 +192,8 @@ def _get_cmd(prepare=False):
     cmd.add(list_user_secrets)
 
     cmd.add(decrypt_domain, posargs={'count': 1, 'provides': 'domain_name'})
+
+    cmd.add(exec_command, name='exec', post_posargs=True)
 
     cmd.add(list_domains)
     cmd.add(list_domain_secrets, posargs={'count': 1, 'provides': 'domain_name'})
@@ -363,6 +378,25 @@ def migrate_owner(wkf, creds):
     return wkf.migrate_owner(new_owner, creds)
 
 
+
+_VALID_SHELL_IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+_OUTPUT_FORMATS = ('json', 'env', 'shell')
+
+
+def _validate_output_format(output_format):
+    if output_format is not None and output_format not in _OUTPUT_FORMATS:
+        raise UsageError('--output-format must be one of: %s' % ', '.join(_OUTPUT_FORMATS))
+    return output_format
+
+
+def _format_secret_env(name, value):
+    """Format a single name=value pair with double-quoting for safety."""
+    # Escape backslashes and double-quotes inside the value
+    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+    return '%s="%s"' % (name, escaped)
+
+
 """
 Read-only operations follow
 """
@@ -373,12 +407,113 @@ def print_version():
     sys.exit(0)
 
 
-def decrypt_domain(kf, creds, domain_name):
-    'output the decrypted contents of a domain in JSON format'
+def decrypt_domain(kf, creds, domain_name, output_format=None, secret=None):
+    'decrypt and display cleartext for a domain, with optional format and secret filter'
+    output_format = _validate_output_format(output_format)
     decrypted_dict = kf.decrypt_domain(domain_name, creds)
-    echo(json.dumps(decrypted_dict, indent=2, sort_keys=True))
+
+    if secret is not None:
+        if secret not in decrypted_dict:
+            raise UsageError('secret %r not found in domain %r' % (secret, domain_name))
+
+    # Default format: json, unless --secret without explicit --output-format → raw value
+    if output_format is None:
+        if secret is not None:
+            echo(decrypted_dict[secret])
+        else:
+            echo(json.dumps(decrypted_dict, indent=2, sort_keys=True))
+    elif output_format == 'json':
+        if secret is not None:
+            echo(json.dumps({secret: decrypted_dict[secret]}, indent=2, sort_keys=True))
+        else:
+            echo(json.dumps(decrypted_dict, indent=2, sort_keys=True))
+    elif output_format in ('env', 'shell'):
+        prefix = 'export ' if output_format == 'shell' else ''
+        items = {secret: decrypted_dict[secret]} if secret else decrypted_dict
+        for name in sorted(items):
+            if not _VALID_SHELL_IDENTIFIER.match(name):
+                echo.err('warning: %r is not a valid shell identifier' % name)
+            echo(prefix + _format_secret_env(name, items[name]))
+
     return 0
 
+
+# Minimal env vars preserved when --no-passthrough is used
+_PASSTHROUGH_VARS = ('PATH', 'HOME', 'TERM', 'LANG', 'USER', 'SHELL', 'LOGNAME')
+
+# Env vars scrubbed from the child process unconditionally
+_SCRUBBED_VARS = ('PPROTECT_PASSPHRASE', 'PPROTECT_USER')
+
+
+def _transform_secret_name(name, prefix=None, uppercase=False):
+    """Apply prefix and/or uppercase transformation to a secret name."""
+    if uppercase:
+        name = re.sub(r'[^A-Za-z0-9]', '_', name).upper()
+    if prefix:
+        name = prefix + '_' + name
+    return name
+
+
+def _build_exec_env(decrypted_dict, prefix=None, uppercase=False,
+                    no_passthrough=False, base_env=None):
+    """Build the child process environment for exec.
+
+    Returns a dict of env vars: decrypted secrets (optionally transformed)
+    injected into either a passthrough or minimal base environment, with
+    credential vars always scrubbed.
+    """
+    if base_env is None:
+        base_env = os.environ
+
+    # Build secret env vars with optional name transformations
+    secret_env = {}
+    for name, value in decrypted_dict.items():
+        env_name = _transform_secret_name(name, prefix=prefix, uppercase=uppercase)
+        if env_name in secret_env:
+            raise UsageError(
+                'secret name collision after transformation: %r and a prior secret both map to %r'
+                % (name, env_name))
+        secret_env[env_name] = value
+
+    # Build the child environment
+    if no_passthrough:
+        child_env = {k: base_env[k] for k in _PASSTHROUGH_VARS if k in base_env}
+    else:
+        child_env = dict(base_env)
+
+    # Always scrub credential env vars from the child
+    for var in _SCRUBBED_VARS:
+        child_env.pop(var, None)
+
+    # Inject decrypted secrets (after scrub, so secrets named PPROTECT_* still work)
+    child_env.update(secret_env)
+
+    return child_env
+
+
+def exec_command(kf, creds, domain, post_posargs_,
+                 prefix=None, uppercase=False, no_passthrough=False):
+    'run a command with decrypted domain secrets injected as environment variables'
+    if not domain:
+        raise UsageError('--domain is required for exec')
+    if not post_posargs_:
+        raise UsageError('exec requires a command after -- (e.g. pprotect exec --domain prod -- ./myapp)')
+
+    decrypted_dict = kf.decrypt_domain(domain, creds)
+    child_env = _build_exec_env(decrypted_dict, prefix=prefix, uppercase=uppercase,
+                                no_passthrough=no_passthrough)
+
+    cmd_args = list(post_posargs_)
+    executable = cmd_args[0]
+
+    # Use os.execvpe to replace the current process (Unix).
+    # On Windows, fall back to subprocess since execvpe behavior differs.
+    if sys.platform == 'win32':
+        import subprocess
+        result = subprocess.run(cmd_args, env=child_env)
+        sys.exit(result.returncode)
+    else:
+        os.execvpe(executable, cmd_args, child_env)
 
 def list_domains(kf):
     'print a list of domain names, if any'
