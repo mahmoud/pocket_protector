@@ -150,12 +150,12 @@ Commands:
 
 Pocket Protector is commonly used in CI/CD pipelines and increasingly
 alongside AI coding agents. In these contexts, secret hygiene matters
-more than usual -- any process with shell access can read environment
+more than usual. Any process with shell access can read environment
 variables, `cat .env`, or inspect `/proc/*/environ`.
 
 ### Credential injection: from safest to weakest
 
-1. **`pprotect exec`** (recommended) -- decrypts a domain and injects
+1. **`pprotect exec`** (safest): decrypts a domain and injects
    secrets as env vars into a child process. The custodian passphrase
    is scrubbed from the child environment. Secrets exist only in the
    child process memory, never on disk or in the parent env.
@@ -164,7 +164,7 @@ variables, `cat .env`, or inspect `/proc/*/environ`.
    pprotect exec --domain prod -- ./myapp --flag arg
    ```
 
-2. **`--passphrase-file`** from a restricted mount -- store the
+2. **`--passphrase-file`** from a restricted mount: store the
    passphrase on a tmpfs or Docker secret mount with `0400`
    permissions. Keeps the passphrase off the command line and out of
    the process environment.
@@ -173,33 +173,33 @@ variables, `cat .env`, or inspect `/proc/*/environ`.
    pprotect decrypt-domain prod --passphrase-file /run/secrets/pp_pass
    ```
 
-3. **`--key-type raw` custodian** -- generates a 256-bit machine key
-   with no KDF. Suitable for service accounts scoped to specific
-   domains. Store the raw key in a platform keychain or HSM.
-
-4. **`PPROTECT_PASSPHRASE` env var** -- the simplest option but the
-   weakest. Readable by any subprocess, including AI agents, build
+3. **`PPROTECT_PASSPHRASE` env var** (simplest): the classic option
+   but not the safest. Readable by any subprocess, including AI agents, build
    scripts, and debug tooling. Use only when other options are not
    available.
 
 ### Output formats for `decrypt-domain`
 
-`decrypt-domain` supports `--format json` (default), `--format env`
-(dotenv-style), and `--format shell` (`eval`-able exports). Use
+`decrypt-domain` supports `--output-format json` (default), `--output-format env`
+(dotenv-style), and `--output-format shell` (`eval`-able exports). Use
 `--secret SECRET_NAME` to extract a single value.
+
+Secret names are case-sensitive and stored exactly as provided. The
+validation rule is: start with a letter, then ASCII letters, digits,
+hyphens, or underscores (e.g. `db-pass`, `API_KEY`, `tls-cert`).
 
 ```sh
 # JSON (default)
 pprotect decrypt-domain prod
 
 # .env format
-pprotect decrypt-domain prod --format env
+pprotect decrypt-domain prod --output-format env
 
 # Shell export format
-eval $(pprotect decrypt-domain prod --format shell)
+eval $(pprotect decrypt-domain prod --output-format shell)
 
-# Single secret, raw value
-DB_PASS=$(pprotect decrypt-domain prod --secret DB_PASS)
+# Single secret, raw value (name must match exactly)
+db_pass=$(pprotect decrypt-domain prod --secret db-pass)
 ```
 
 ### What Pocket Protector is not
