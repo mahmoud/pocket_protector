@@ -5,13 +5,17 @@ management infrastructure. Pocket Protector enables *key management as
 code*, securely storing secrets in a versionable format, right
 alongside the corresponding application code.
 
+> **Note:** The canonical repository is now [github.com/mahmoud/pocket_protector](https://github.com/mahmoud/pocket_protector). The original home was [github.com/SimpleLegal/pocket_protector](https://github.com/SimpleLegal/pocket_protector).
+
+> See the [debut meetup talk](https://www.youtube.com/watch?v=7Zhxu_4qhyM) for an introduction.
+
 Pocket Protector's approach lets you:
 
 * Leverage existing user, versioning, and backup systems, with no
   infrastructure to set up
 * Support multiple environments
 * Integrate easily with existing key management systems
-  (AWS/Heroku/TravisCI)
+  (AWS/Heroku/GitHub Actions)
 
 Pocket Protector also:
 
@@ -35,7 +39,7 @@ installation:
 
 ```sh
 $ pprotect version
-pocket_protector version 18.0.1
+pocket_protector version 26.0.0dev
 ```
 
 Once the above is working, we're ready to start using Pocket Protector!
@@ -46,7 +50,7 @@ Once the above is working, we're ready to start using Pocket Protector!
 Pocket Protector aims to be as easy to use as a secret management
 system can get. That said, understanding security takes time, so be
 sure to go beyond the quick start and reference below, and read our
-[User Guide](https://github.com/SimpleLegal/pocket_protector/blob/master/USER_GUIDE.md)
+[User Guide](https://github.com/mahmoud/pocket_protector/blob/master/USER_GUIDE.md)
 as well.
 
 
@@ -104,6 +108,8 @@ options, highlighted here:
 
 In all cases, flags take precedence over environment variables, and
 both take precedence over and bypass interactive prompts. In the event
+an incorrect credential is passed, `pocket_protector` does *not*
+automatically check other sources.
 
 #### Custom env var prefix
 
@@ -125,12 +131,10 @@ pprotect decrypt-domain staging --env-prefix PROJECTB
 The default prefix remains `PPROTECT`, so existing workflows are unaffected.
 When using `pprotect exec` with a custom prefix, both the custom prefix vars
 and the default `PPROTECT_*` vars are scrubbed from the child process.
-an incorrect credential is passed, `pocket_protector` does *not*
-automatically check other sources.
 
 
 See our
-[User Guide](https://github.com/SimpleLegal/pocket_protector/blob/master/USER_GUIDE.md)
+[User Guide](https://github.com/mahmoud/pocket_protector/blob/master/USER_GUIDE.md)
 for more usage tips.
 
 
@@ -148,6 +152,8 @@ Commands:
   add-secret            add a secret to a specified domain
   decrypt-domain        decrypt and display JSON-formatted cleartext for a
                         domain
+  exec                  run a command with decrypted secrets injected as
+                        environment variables
   init                  create a new pocket-protected file
   list-all-secrets      display all secrets, with a list of domains the key is
                         present in
@@ -157,6 +163,10 @@ Commands:
   list-domains          display a list of available domains
   list-user-secrets     similar to list-all-secrets, but filtered by a given
                         user
+  migrate-owner         migrate all domain ownerships from one custodian to
+                        another
+  rekey-custodian       re-encrypt a custodian's key with a new passphrase
+                        and/or KDF
   rm-domain             remove a domain from the protected
   rm-owner              remove an owner's privileges on a specified domain
   rm-secret             remove a secret from a specified domain
@@ -165,8 +175,7 @@ Commands:
   set-key-custodian-passphrase
                         change a key custodian passphrase
   update-secret         update an existing secret in a specified domain
-  exec                  run a command with decrypted secrets injected as
-                        environment variables
+  version               display the current version
 ```
 
 

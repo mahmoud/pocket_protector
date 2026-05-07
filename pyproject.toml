@@ -40,7 +40,10 @@ pprotect = "pocket_protector.__main__:main"
 pocket_protector = "pocket_protector.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/SimpleLegal/pocket_protector"
+Homepage = "https://github.com/mahmoud/pocket_protector"
+Repository = "https://github.com/mahmoud/pocket_protector"
+Documentation = "https://github.com/mahmoud/pocket_protector/blob/master/USER_GUIDE.md"
+Changelog = "https://github.com/mahmoud/pocket_protector/blob/master/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
