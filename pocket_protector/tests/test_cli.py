@@ -867,3 +867,124 @@ def test_exec_subprocess_prefix_uppercase(tmp_path, _fast_crypto):
     child_env = json.loads(result.stdout)
     assert child_env['MYAPP_DB_PASS'] == 'myval'
     assert 'db-pass' not in child_env
+
+
+# --- Custom env prefix tests ---
+
+
+def test_build_exec_env_default_prefix_unchanged():
+    """Default env_prefix preserves existing scrub behavior exactly."""
+    base = {'PATH': '/usr/bin', 'PPROTECT_PASSPHRASE': 'leaked', 'PPROTECT_USER': 'leaked@user'}
+    secrets = {'DB_PASS': 'ok'}
+    result = cli._build_exec_env(secrets, base_env=base)
+    assert 'PPROTECT_PASSPHRASE' not in result
+    assert 'PPROTECT_USER' not in result
+    assert result['DB_PASS'] == 'ok'
+    assert result['PATH'] == '/usr/bin'
+
+
+def test_build_exec_env_custom_prefix_scrub():
+    """Custom env_prefix scrubs both custom AND default PPROTECT_* vars."""
+    base = {
+        'PATH': '/usr/bin',
+        'PPROTECT_PASSPHRASE': 'default_leaked',
+        'PPROTECT_USER': 'default_user',
+        'MYAPP_USER': 'custom_user',
+        'MYAPP_PASSPHRASE': 'custom_leaked',
+        'KEEP_THIS': 'yes',
+    }
+    secrets = {'DB_PASS': 'ok'}
+    result = cli._build_exec_env(secrets, base_env=base, env_prefix='MYAPP')
+    # Both default and custom prefix vars scrubbed
+    assert 'PPROTECT_PASSPHRASE' not in result
+    assert 'PPROTECT_USER' not in result
+    assert 'MYAPP_USER' not in result
+    assert 'MYAPP_PASSPHRASE' not in result
+    # Non-credential vars preserved
+    assert result['KEEP_THIS'] == 'yes'
+    assert result['DB_PASS'] == 'ok'
+
+
+def test_custom_env_prefix_creds(tmp_path, _fast_crypto):
+    """Verify _get_creds reads from custom-prefixed env vars."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    # Use custom prefix env vars with --env-prefix
+    custom_env = {'MYAPP_USER': KURT_EMAIL, 'MYAPP_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=custom_env, reraise=True)
+    cc.run(['pprotect', 'add-domain', '--env-prefix', 'MYAPP'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'],
+           input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    res = cc.run(['pprotect', 'decrypt-domain', '--env-prefix', 'MYAPP', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_cli_env_prefix_flag(tmp_path, _fast_crypto):
+    """Integration test: --env-prefix with CommandChecker reads custom vars
+    and ignores default PPROTECT_* vars."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    # Set custom prefix vars, do NOT set PPROTECT_*
+    custom_env = {'MYAPP_USER': KURT_EMAIL, 'MYAPP_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=custom_env, reraise=True)
+    cc.run(['pprotect', 'add-domain', '--env-prefix', 'MYAPP'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'],
+           input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    # Verify custom prefix works for decrypt
+    res = cc.run(['pprotect', 'decrypt-domain', '--env-prefix', 'MYAPP', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+    # Verify default prefix env vars are NOT used when custom is set
+    default_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': 'wrong_phrase'}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=default_env, reraise=True)
+    # With --env-prefix MYAPP, PPROTECT_* vars should be ignored for credential lookup,
+    # so this should fail (no MYAPP_USER/MYAPP_PASSPHRASE set, non-interactive)
+    cc2.fail_1(['pprotect', 'decrypt-domain', '--env-prefix', 'MYAPP',
+                '--non-interactive', DOMAIN_NAME])
+
+
+def test_exec_subprocess_custom_prefix(tmp_path, _fast_crypto):
+    """Subprocess integration: exec with --env-prefix scrubs both default and custom vars."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = str(tmp_path) + '/protected.yaml'
+    cc.run('pprotect init --file %s --key-type fast' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    custom_env = {'MYAPP_USER': KURT_EMAIL, 'MYAPP_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=custom_env, reraise=True)
+    cc.run(['pprotect', 'add-domain', '--env-prefix', 'MYAPP'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'],
+           input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    # Run exec via subprocess with both default and custom env vars set
+    env = dict(os.environ)
+    env['PPROTECT_USER'] = 'should_be_scrubbed'
+    env['PPROTECT_PASSPHRASE'] = 'should_be_scrubbed'
+    env['MYAPP_USER'] = KURT_EMAIL
+    env['MYAPP_PASSPHRASE'] = KURT_PHRASE
+    result = subprocess.run(
+        ['pprotect', 'exec', '--non-interactive',
+         '--domain', DOMAIN_NAME,
+         '--env-prefix', 'MYAPP',
+         '--file', protected_path,
+         '--', 'python3', '-c',
+         'import os, json; print(json.dumps(dict(os.environ)))'],
+        capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert result.returncode == 0, 'stderr: %s' % result.stderr
+    child_env = json.loads(result.stdout)
+    # Secret should be injected
+    assert child_env[SECRET_NAME] == SECRET_VALUE
+    # Both default and custom credential vars should be scrubbed
+    assert 'PPROTECT_PASSPHRASE' not in child_env
+    assert 'PPROTECT_USER' not in child_env
+    assert 'MYAPP_USER' not in child_env
+    assert 'MYAPP_PASSPHRASE' not in child_env

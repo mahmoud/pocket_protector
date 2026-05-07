@@ -21,6 +21,13 @@ _ANSI_FORE_RED = '\x1b[31m'
 _ANSI_FORE_GREEN = '\x1b[32m'
 _ANSI_RESET_ALL = '\x1b[0m'
 
+DEFAULT_ENV_PREFIX = 'PPROTECT'
+
+
+def _env_var_names(prefix):
+    """Return (user_var, passphrase_var) for a given prefix."""
+    return (prefix + '_USER', prefix + '_PASSPHRASE')
+
 # TODO: custodian-signed values. allow custodians to sign values
 # added/set by others, then produced reports on which secrets have been
 # updated/changed but not signed yet. enables a review/audit mechanism.
@@ -144,7 +151,7 @@ def _get_cmd(prepare=False):
     cmd.add('--non-interactive', parse_as=True,
             doc='disable falling back to interactive authentication, useful for automation')
     cmd.add('--ignore-env', parse_as=True, display=False,  # TODO: keep?
-            doc='ignore environment variables like PPROTECT_PASSPHRASE')
+            doc='ignore credential environment variables (e.g., PPROTECT_PASSPHRASE)')
     cmd.add('--user', char='-u',
             doc="the acting user's email credential")
     cmd.add('--passphrase-file',
@@ -163,6 +170,8 @@ def _get_cmd(prepare=False):
             doc='convert secret names to UPPER_CASE env var names (exec only)')
     cmd.add('--no-passthrough', parse_as=True,
             doc='exec with clean env: secrets + PATH/HOME/TERM/LANG only')
+    cmd.add('--env-prefix', missing=DEFAULT_ENV_PREFIX,
+            doc='env var prefix for USER and PASSPHRASE credentials (default: PPROTECT)')
 
     # add middlewares, outermost first ("first added, first called")
     cmd.add(mw_verify_creds)
@@ -455,7 +464,7 @@ def _transform_secret_name(name, prefix=None, uppercase=False):
 
 
 def _build_exec_env(decrypted_dict, prefix=None, uppercase=False,
-                    no_passthrough=False, base_env=None):
+                    no_passthrough=False, base_env=None, env_prefix=DEFAULT_ENV_PREFIX):
     """Build the child process environment for exec.
 
     Returns a dict of env vars: decrypted secrets (optionally transformed)
@@ -481,8 +490,13 @@ def _build_exec_env(decrypted_dict, prefix=None, uppercase=False,
     else:
         child_env = dict(base_env)
 
-    # Always scrub credential env vars from the child
-    for var in _SCRUBBED_VARS:
+    # Always scrub default PPROTECT_* plus any custom prefix vars
+    scrub_vars = set(_SCRUBBED_VARS)
+    if env_prefix != DEFAULT_ENV_PREFIX:
+        custom_user, custom_pass = _env_var_names(env_prefix)
+        scrub_vars.add(custom_user)
+        scrub_vars.add(custom_pass)
+    for var in scrub_vars:
         child_env.pop(var, None)
 
     # Inject decrypted secrets (after scrub, so secrets named PPROTECT_* still work)
@@ -492,7 +506,8 @@ def _build_exec_env(decrypted_dict, prefix=None, uppercase=False,
 
 
 def exec_command(kf, creds, domain, post_posargs_,
-                 prefix=None, uppercase=False, no_passthrough=False):
+                 prefix=None, uppercase=False, no_passthrough=False,
+                 env_prefix=DEFAULT_ENV_PREFIX):
     'run a command with decrypted domain secrets injected as environment variables'
     if not domain:
         raise UsageError('--domain is required for exec')
@@ -501,7 +516,7 @@ def exec_command(kf, creds, domain, post_posargs_,
 
     decrypted_dict = kf.decrypt_domain(domain, creds)
     child_env = _build_exec_env(decrypted_dict, prefix=prefix, uppercase=uppercase,
-                                no_passthrough=no_passthrough)
+                                no_passthrough=no_passthrough, env_prefix=env_prefix)
 
     cmd_args = list(post_posargs_)
     executable = cmd_args[0]
@@ -575,11 +590,14 @@ Begin middlewares
 
 
 @face_middleware(provides=['creds'], optional=True)
-def mw_verify_creds(next_, kf, user, ignore_env, non_interactive, passphrase_file):
+def mw_verify_creds(next_, kf, user, ignore_env, non_interactive, passphrase_file, env_prefix):
+    user_var, pass_var = _env_var_names(env_prefix)
     creds = _get_creds(kf, user,
                        check_env=not ignore_env,
                        interactive=not non_interactive,
-                       passphrase_file=passphrase_file)
+                       passphrase_file=passphrase_file,
+                       user_env_var=user_var,
+                       pass_env_var=pass_var)
     return next_(creds=creds)
 
 

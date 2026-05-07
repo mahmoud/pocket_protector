@@ -92,6 +92,9 @@ options, highlighted here:
     management, like Docker)
   * `--domain DOMAIN` - specifies the name of the domain
   * `--non-interactive` - causes the command to fail when credentials cannot be gotten by other means
+  * `--env-prefix PREFIX` - sets the env var prefix for credential
+    lookup (default: `PPROTECT`). When set, credentials are read from
+    `PREFIX_USER` and `PREFIX_PASSPHRASE` instead of the defaults
 
 * Environment variables
   * `PPROTECT_USER` - environment variable which contains the user email
@@ -101,6 +104,27 @@ options, highlighted here:
 
 In all cases, flags take precedence over environment variables, and
 both take precedence over and bypass interactive prompts. In the event
+
+#### Custom env var prefix
+
+In environments where multiple pocket_protector-managed projects coexist,
+use `--env-prefix` to namespace credential env vars per project:
+
+```sh
+# Project A
+export PROJECTA_USER=alice@example.com
+export PROJECTA_PASSPHRASE=secret_a
+pprotect decrypt-domain prod --env-prefix PROJECTA
+
+# Project B (simultaneously)
+export PROJECTB_USER=bob@example.com
+export PROJECTB_PASSPHRASE=secret_b
+pprotect decrypt-domain staging --env-prefix PROJECTB
+```
+
+The default prefix remains `PPROTECT`, so existing workflows are unaffected.
+When using `pprotect exec` with a custom prefix, both the custom prefix vars
+and the default `PPROTECT_*` vars are scrubbed from the child process.
 an incorrect credential is passed, `pocket_protector` does *not*
 automatically check other sources.
 
