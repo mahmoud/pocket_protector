@@ -1,7 +1,0 @@
-attrs
-boltons
-face>=24.0.0
-pytest
-PyNaCl
-ruamel.yaml
-schema

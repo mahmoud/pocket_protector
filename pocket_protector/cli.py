@@ -14,7 +14,7 @@ import difflib
 
 from face import Command, Flag, face_middleware, CommandLineError, UsageError, echo, prompt
 
-from ._version import __version__
+from . import __version__
 from .file_keys import KeyFile, Creds, PPError
 
 _ANSI_FORE_RED = '\x1b[31m'
