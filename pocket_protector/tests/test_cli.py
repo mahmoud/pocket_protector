@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+import sys
 
 import ruamel.yaml
 from face import CommandChecker
@@ -789,7 +790,9 @@ def test_exec_subprocess_integration(tmp_path, _fast_crypto):
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
     cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
     cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
-    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    # Use env-var-safe name (no hyphens) — hyphenated names are not portable as
+    # env vars on Windows, and exec injects secrets as env vars.
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'EXEC_KEY', 'exec_val'])
 
     # Run pprotect exec via subprocess, using a python one-liner to dump env
     env = dict(os.environ)
@@ -799,13 +802,13 @@ def test_exec_subprocess_integration(tmp_path, _fast_crypto):
         ['pprotect', 'exec', '--non-interactive',
          '--domain', DOMAIN_NAME,
          '--file', protected_path,
-         '--', 'python3', '-c',
+         '--', sys.executable, '-c',
          'import os, json; print(json.dumps(dict(os.environ)))'],
         capture_output=True, text=True, env=env, cwd=str(tmp_path))
     assert result.returncode == 0, 'stderr: %s' % result.stderr
     child_env = json.loads(result.stdout)
     # Secret should be in child env
-    assert child_env[SECRET_NAME] == SECRET_VALUE
+    assert child_env['EXEC_KEY'] == 'exec_val'
     # Credentials should NOT be in child env
     assert 'PPROTECT_PASSPHRASE' not in child_env
     assert 'PPROTECT_USER' not in child_env
@@ -821,7 +824,7 @@ def test_exec_subprocess_no_passthrough(tmp_path, _fast_crypto):
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
     cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
     cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
-    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'EXEC_KEY', 'exec_val'])
 
     env = dict(os.environ)
     env['PPROTECT_USER'] = KURT_EMAIL
@@ -832,12 +835,12 @@ def test_exec_subprocess_no_passthrough(tmp_path, _fast_crypto):
          '--domain', DOMAIN_NAME,
          '--no-passthrough',
          '--file', protected_path,
-         '--', 'python3', '-c',
+         '--', sys.executable, '-c',
          'import os, json; print(json.dumps(dict(os.environ)))'],
         capture_output=True, text=True, env=env, cwd=str(tmp_path))
     assert result.returncode == 0, 'stderr: %s' % result.stderr
     child_env = json.loads(result.stdout)
-    assert child_env[SECRET_NAME] == SECRET_VALUE
+    assert child_env['EXEC_KEY'] == 'exec_val'
     assert 'SHOULD_NOT_APPEAR' not in child_env
     assert 'PPROTECT_PASSPHRASE' not in child_env
     # PATH should still be present
@@ -864,7 +867,7 @@ def test_exec_subprocess_prefix_uppercase(tmp_path, _fast_crypto):
          '--domain', DOMAIN_NAME,
          '--prefix', 'MYAPP', '--uppercase',
          '--file', protected_path,
-         '--', 'python3', '-c',
+         '--', sys.executable, '-c',
          'import os, json; print(json.dumps(dict(os.environ)))'],
         capture_output=True, text=True, env=env, cwd=str(tmp_path))
     assert result.returncode == 0, 'stderr: %s' % result.stderr
@@ -967,7 +970,7 @@ def test_exec_subprocess_custom_prefix(tmp_path, _fast_crypto):
     cc = CommandChecker(cmd, chdir=str(tmp_path), env=custom_env, reraise=True)
     cc.run(['pprotect', 'add-domain', '--env-prefix', 'MYAPP'], input=[DOMAIN_NAME])
     cc.run(['pprotect', 'add-secret'],
-           input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+           input=[DOMAIN_NAME, 'EXEC_KEY', 'exec_val'])
 
     # Run exec via subprocess with both default and custom env vars set
     env = dict(os.environ)
@@ -980,13 +983,13 @@ def test_exec_subprocess_custom_prefix(tmp_path, _fast_crypto):
          '--domain', DOMAIN_NAME,
          '--env-prefix', 'MYAPP',
          '--file', protected_path,
-         '--', 'python3', '-c',
+         '--', sys.executable, '-c',
          'import os, json; print(json.dumps(dict(os.environ)))'],
         capture_output=True, text=True, env=env, cwd=str(tmp_path))
     assert result.returncode == 0, 'stderr: %s' % result.stderr
     child_env = json.loads(result.stdout)
     # Secret should be injected
-    assert child_env[SECRET_NAME] == SECRET_VALUE
+    assert child_env['EXEC_KEY'] == 'exec_val'
     # Both default and custom credential vars should be scrubbed
     assert 'PPROTECT_PASSPHRASE' not in child_env
     assert 'PPROTECT_USER' not in child_env
