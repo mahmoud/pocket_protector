@@ -500,7 +500,7 @@ class KeyFile(object):
         return text
 
     def _new_log(self, entry, *a, **kw):
-        cur_time_str = datetime.datetime.utcnow().isoformat().split('.')[0] + 'Z'
+        cur_time_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         new_entry = cur_time_str + ' -- ' + (entry.format(*a, **kw))
         return self._log + [new_entry]
 

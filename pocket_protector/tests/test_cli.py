@@ -8,6 +8,11 @@ from face import CommandChecker
 from pocket_protector import cli
 
 
+def _fwd(path):
+    """Forward-slash path string, safe for shlex.split on all platforms."""
+    return str(path).replace('\\', '/')
+
+
 def test_prepare():
     # confirms that all subcommands compile together nicely
     assert cli._get_cmd(prepare=True)
@@ -31,8 +36,7 @@ def test_cli(tmp_path, _fast_crypto):
 
     assert cc.run('pprotect version').stdout.startswith('pocket_protector version')
 
-    tmp_path = str(tmp_path)
-    protected_path = tmp_path + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
 
     # fail init and ensure that file isn't created
     cc.fail_1('pprotect init --file %s' % protected_path,
@@ -61,7 +65,7 @@ def test_cli(tmp_path, _fast_crypto):
     # make a new cc, with env and tmp_path baked in (also tests
     # protected.yaml in the cur dir being the default file)
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
-    cc = CommandChecker(cmd, chdir=tmp_path, env=kurt_env, reraise=True)
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
 
     res = cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
     assert 'Adding new domain.' in res.stdout
@@ -90,7 +94,7 @@ def test_cli(tmp_path, _fast_crypto):
     cc.run('pprotect add-owner', input=[DOMAIN_NAME, MH_EMAIL])
 
     # missing protected
-    cc.fail_2('pprotect list-all-secrets', chdir=tmp_path + '/..')
+    cc.fail_2('pprotect list-all-secrets', chdir=str(tmp_path.parent))
 
     res = cc.run('pprotect list-all-secrets')
     assert '{}: {}\n'.format(SECRET_NAME, DOMAIN_NAME) == res.stdout
@@ -120,7 +124,7 @@ def test_cli(tmp_path, _fast_crypto):
                  input=[KURT_EMAIL, KURT_PHRASE, new_kurt_phrase, new_kurt_phrase])
 
     # try new passphrase with a passphrase file why not
-    ppfile_path = str(tmp_path) + 'tmp_passphrase'
+    ppfile_path = _fwd(tmp_path / 'tmp_passphrase')
     with open(ppfile_path, 'wb') as f:
         f.write(new_kurt_phrase.encode('utf8'))
     res = cc.run(['pprotect', 'decrypt-domain', '--non-interactive',
@@ -161,7 +165,7 @@ def test_cli_key_type_fast(tmp_path, _fast_crypto):
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
 
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
 
     # Init with fast crypto
     res = cc.run(f'pprotect init --file {protected_path} --key-type fast',
@@ -181,7 +185,7 @@ def test_cli_migrate_owner(tmp_path, _fast_crypto):
     """Test the migrate-owner CLI subcommand."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
 
     # Init with kurt
     cc.run('pprotect init --file %s' % protected_path,
@@ -215,7 +219,7 @@ def test_cli_list_user_secrets(tmp_path, _fast_crypto):
     """Test the list-user-secrets CLI subcommand."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
 
     # Init with kurt
     cc.run('pprotect init --file %s' % protected_path,
@@ -238,7 +242,7 @@ def test_cli_add_raw_key_custodian(tmp_path, _fast_crypto):
     """Test add-key-custodian --key-type raw."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     # Init with kurt (normal custodian)
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
@@ -269,7 +273,7 @@ def test_cli_add_raw_key_custodian_abort(tmp_path, _fast_crypto):
     """Test that declining confirmation aborts without creating custodian."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
 
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
@@ -281,7 +285,7 @@ def test_cli_add_raw_key_custodian_abort(tmp_path, _fast_crypto):
     assert 'Aborting' in res.stdout
     # Custodian should not exist
     import ruamel.yaml
-    data = ruamel.yaml.YAML().load(open(str(tmp_path) + '/protected.yaml').read())
+    data = ruamel.yaml.YAML().load(open(_fwd(tmp_path / 'protected.yaml')).read())
     assert 'raw@example.com' not in data['key-custodians']
 
 
@@ -289,7 +293,7 @@ def test_cli_rekey_custodian(tmp_path, _fast_crypto):
     """Test rekey-custodian to change key type."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
 
     # Init with kurt (hard key type)
     cc.run('pprotect init --file %s' % protected_path,
@@ -322,7 +326,7 @@ def test_cli_invalid_key_type(tmp_path, _fast_crypto):
     """Test that --key-type with an invalid value fails."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     res = cc.fail('pprotect init --file %s --key-type bogus' % protected_path,
                   input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     assert 'key-type' in res.stderr.lower() or 'hard' in res.stderr.lower()
@@ -332,7 +336,7 @@ def test_cli_passphrase_file_not_found(tmp_path, _fast_crypto):
     """Test that a nonexistent passphrase file gives a clear error."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     cc = CommandChecker(cmd, chdir=str(tmp_path), reraise=True)
@@ -345,7 +349,7 @@ def test_cli_list_domains_empty(tmp_path, _fast_crypto):
     """Test list-domains with no domains shows message on stderr."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     cc = CommandChecker(cmd, chdir=str(tmp_path), reraise=True)
@@ -357,7 +361,7 @@ def test_cli_list_domain_secrets_empty(tmp_path, _fast_crypto):
     """Test list-domain-secrets with no secrets shows message on stderr."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -371,7 +375,7 @@ def test_cli_list_all_secrets_empty(tmp_path, _fast_crypto):
     """Test list-all-secrets with no secrets shows message on stderr."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -385,7 +389,7 @@ def test_cli_set_passphrase_fast(tmp_path, _fast_crypto):
     """Test set-key-custodian-passphrase with --key-type fast."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -406,7 +410,7 @@ def test_cli_rekey_custodian_fast(tmp_path, _fast_crypto):
     """Test rekey-custodian --key-type fast."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -426,7 +430,7 @@ def test_cli_rekey_custodian_hard(tmp_path, _fast_crypto):
     """Test rekey-custodian --key-type hard."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -446,7 +450,7 @@ def test_cli_rekey_custodian_abort(tmp_path, _fast_crypto):
     """Test rekey-custodian --key-type raw abort when user types 'no'."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -464,7 +468,7 @@ def test_cli_migrate_owner_no_domains(tmp_path, _fast_crypto):
     """Test migrate-owner when the user owns no domains."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -482,7 +486,7 @@ def test_cli_migrate_owner_abort(tmp_path, _fast_crypto):
     """Test migrate-owner abort when user types 'n' at confirm."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -504,7 +508,7 @@ def test_decrypt_domain_format_env(tmp_path, _fast_crypto):
     """Test --output-format env produces dotenv-style output."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -525,7 +529,7 @@ def test_decrypt_domain_format_shell(tmp_path, _fast_crypto):
     """Test --output-format shell produces eval-able export lines."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -543,7 +547,7 @@ def test_decrypt_domain_format_env_special_chars(tmp_path, _fast_crypto):
     """Test env format correctly escapes quotes and backslashes in values."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -560,7 +564,7 @@ def test_decrypt_domain_format_env_invalid_name_warns(tmp_path, _fast_crypto):
     """Test that secret names that aren't valid shell identifiers produce a warning."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -579,7 +583,7 @@ def test_decrypt_domain_secret_raw(tmp_path, _fast_crypto):
     """Test --secret without --output-format outputs raw value."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -596,7 +600,7 @@ def test_decrypt_domain_secret_json(tmp_path, _fast_crypto):
     """Test --secret with --output-format json outputs single-key JSON."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -614,7 +618,7 @@ def test_decrypt_domain_secret_shell(tmp_path, _fast_crypto):
     """Test --secret with --output-format shell outputs single export line."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -631,7 +635,7 @@ def test_decrypt_domain_secret_not_found(tmp_path, _fast_crypto):
     """Test --secret with a nonexistent name fails with clear error."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -647,7 +651,7 @@ def test_decrypt_domain_format_invalid(tmp_path, _fast_crypto):
     """Test --output-format with an invalid value fails."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -751,7 +755,7 @@ def test_exec_missing_domain(tmp_path, _fast_crypto):
     """Test exec without --domain fails with clear error."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -765,7 +769,7 @@ def test_exec_missing_command(tmp_path, _fast_crypto):
     """Test exec without a command after -- fails with clear error."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -779,7 +783,7 @@ def test_exec_subprocess_integration(tmp_path, _fast_crypto):
     """Integration test: exec injects secrets and scrubs credentials via subprocess."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s --key-type fast' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -811,7 +815,7 @@ def test_exec_subprocess_no_passthrough(tmp_path, _fast_crypto):
     """Integration test: --no-passthrough produces minimal env."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s --key-type fast' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -844,7 +848,7 @@ def test_exec_subprocess_prefix_uppercase(tmp_path, _fast_crypto):
     """Integration test: --prefix and --uppercase transform secret names."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s --key-type fast' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
@@ -909,7 +913,7 @@ def test_custom_env_prefix_creds(tmp_path, _fast_crypto):
     """Verify _get_creds reads from custom-prefixed env vars."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
 
@@ -928,7 +932,7 @@ def test_cli_env_prefix_flag(tmp_path, _fast_crypto):
     and ignores default PPROTECT_* vars."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
 
@@ -956,7 +960,7 @@ def test_exec_subprocess_custom_prefix(tmp_path, _fast_crypto):
     """Subprocess integration: exec with --env-prefix scrubs both default and custom vars."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
-    protected_path = str(tmp_path) + '/protected.yaml'
+    protected_path = _fwd(tmp_path / 'protected.yaml')
     cc.run('pprotect init --file %s --key-type fast' % protected_path,
            input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
     custom_env = {'MYAPP_USER': KURT_EMAIL, 'MYAPP_PASSPHRASE': KURT_PHRASE}
