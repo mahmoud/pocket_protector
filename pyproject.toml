@@ -42,7 +42,7 @@ pocket_protector = "pocket_protector.__main__:main"
 [project.urls]
 Homepage = "https://github.com/mahmoud/pocket_protector"
 Repository = "https://github.com/mahmoud/pocket_protector"
-Documentation = "https://github.com/mahmoud/pocket_protector/blob/master/USER_GUIDE.md"
+Documentation = "https://pocket-protector.readthedocs.io/"
 Changelog = "https://github.com/mahmoud/pocket_protector/blob/master/CHANGELOG.md"
 
 [dependency-groups]

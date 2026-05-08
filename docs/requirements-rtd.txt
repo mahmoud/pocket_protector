@@ -1,0 +1,4 @@
+# Docs build dependencies for ReadTheDocs.
+# Unpinned for simplicity; pin specific versions here if RTD builds break.
+sphinx
+sphinx_rtd_theme
