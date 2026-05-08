@@ -39,7 +39,7 @@ installation:
 
 ```sh
 $ pprotect version
-pocket_protector version 26.0.0dev
+pocket_protector version 26.0.0
 ```
 
 Once the above is working, we're ready to start using Pocket Protector!
@@ -99,6 +99,9 @@ options, highlighted here:
   * `--env-prefix PREFIX` - sets the env var prefix for credential
     lookup (default: `PPROTECT`). When set, credentials are read from
     `PREFIX_USER` and `PREFIX_PASSPHRASE` instead of the defaults
+  * `--key-type TYPE` - custodian key type: `hard` (default, slow KDF for
+    production), `fast` (quick KDF for development/testing), or `raw` (no KDF,
+    generated hex key for automation)
 
 * Environment variables
   * `PPROTECT_USER` - environment variable which contains the user email
