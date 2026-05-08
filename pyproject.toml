@@ -1,25 +1,30 @@
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.build_meta"
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
 
 [project]
 name = "pocket-protector"
-version = "24.0.0dev"
+dynamic = ["version"]
 description = "Handy secret management system with a convenient CLI and readable storage format."
 readme = "README.md"
-license = "Apache-2.0"
-requires-python = ">=3.9"
 authors = [
     {name = "Kurt Rose", email = "kurt@kurtrose.com"},
     {name = "Mahmoud Hashemi"},
 ]
+license = {file = "LICENSE.txt"}
+requires-python = ">=3.9"
 classifiers = [
+    "Topic :: Security",
+    "Topic :: Utilities",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
     "attrs",
@@ -35,7 +40,38 @@ pprotect = "pocket_protector.__main__:main"
 pocket_protector = "pocket_protector.__main__:main"
 
 [project.urls]
-Homepage = "https://github.com/SimpleLegal/pocket_protector"
+Homepage = "https://github.com/mahmoud/pocket_protector"
+Repository = "https://github.com/mahmoud/pocket_protector"
+Documentation = "https://github.com/mahmoud/pocket_protector/blob/master/USER_GUIDE.md"
+Changelog = "https://github.com/mahmoud/pocket_protector/blob/master/CHANGELOG.md"
+
+[dependency-groups]
+dev = [
+    "coverage[toml]>=7",
+    "pytest>=8",
+    "tox>=4",
+    "tox-uv>=1",
+]
+
+[tool.flit.sdist]
+include = ["pocket_protector/tests/", "tox.ini", "LICENSE.txt", "README.md", "CHANGELOG.md", "USER_GUIDE.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["pocket_protector/tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["pocket_protector"]
+omit = ["pocket_protector/tests/*"]
+
+[tool.coverage.paths]
+source = [
+    "pocket_protector",
+    "*/site-packages/pocket_protector",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__",
+]

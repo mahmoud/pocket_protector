@@ -1,0 +1,47 @@
+name: Tests
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "*.rst"
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "*.rst"
+jobs:
+  tests:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, python: "3.14", os: ubuntu-latest, tox: py314 }
+          - { name: Windows, python: "3.14", os: windows-latest, tox: py314 }
+          - { name: Mac, python: "3.14", os: macos-latest, tox: py314 }
+          - { name: "3.13", python: "3.13", os: ubuntu-latest, tox: py313 }
+          - { name: "3.12", python: "3.12", os: ubuntu-latest, tox: py312 }
+          - { name: "3.11", python: "3.11", os: ubuntu-latest, tox: py311 }
+          - { name: "3.10", python: "3.10", os: ubuntu-latest, tox: py310 }
+          - { name: "3.9", python: "3.9", os: ubuntu-latest, tox: py39 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+      - run: uvx --with tox-uv tox -e ${{ matrix.tox }}
+      - name: Generate coverage XML
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          uv pip install --system coverage[toml]
+          cd .tox && coverage combine --rcfile ../pyproject.toml && coverage xml --rcfile ../pyproject.toml -o coverage-${{ matrix.tox }}.xml
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v3
+        with:
+          fail_ci_if_error: false
+          files: .tox/coverage-${{ matrix.tox }}.xml

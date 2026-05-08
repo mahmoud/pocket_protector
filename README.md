@@ -5,13 +5,17 @@ management infrastructure. Pocket Protector enables *key management as
 code*, securely storing secrets in a versionable format, right
 alongside the corresponding application code.
 
+> **Note:** The canonical repository is now [github.com/mahmoud/pocket_protector](https://github.com/mahmoud/pocket_protector). The original home was [github.com/SimpleLegal/pocket_protector](https://github.com/SimpleLegal/pocket_protector).
+
+> See the [debut meetup talk](https://www.youtube.com/watch?v=7Zhxu_4qhyM) for an introduction.
+
 Pocket Protector's approach lets you:
 
 * Leverage existing user, versioning, and backup systems, with no
   infrastructure to set up
 * Support multiple environments
 * Integrate easily with existing key management systems
-  (AWS/Heroku/TravisCI)
+  (AWS/Heroku/GitHub Actions)
 
 Pocket Protector also:
 
@@ -35,7 +39,7 @@ installation:
 
 ```sh
 $ pprotect version
-pocket_protector version 18.0.1
+pocket_protector version 26.0.0dev
 ```
 
 Once the above is working, we're ready to start using Pocket Protector!
@@ -46,7 +50,7 @@ Once the above is working, we're ready to start using Pocket Protector!
 Pocket Protector aims to be as easy to use as a secret management
 system can get. That said, understanding security takes time, so be
 sure to go beyond the quick start and reference below, and read our
-[User Guide](https://github.com/SimpleLegal/pocket_protector/blob/master/USER_GUIDE.md)
+[User Guide](https://github.com/mahmoud/pocket_protector/blob/master/USER_GUIDE.md)
 as well.
 
 
@@ -92,6 +96,9 @@ options, highlighted here:
     management, like Docker)
   * `--domain DOMAIN` - specifies the name of the domain
   * `--non-interactive` - causes the command to fail when credentials cannot be gotten by other means
+  * `--env-prefix PREFIX` - sets the env var prefix for credential
+    lookup (default: `PPROTECT`). When set, credentials are read from
+    `PREFIX_USER` and `PREFIX_PASSPHRASE` instead of the defaults
 
 * Environment variables
   * `PPROTECT_USER` - environment variable which contains the user email
@@ -104,9 +111,30 @@ both take precedence over and bypass interactive prompts. In the event
 an incorrect credential is passed, `pocket_protector` does *not*
 automatically check other sources.
 
+#### Custom env var prefix
+
+In environments where multiple pocket_protector-managed projects coexist,
+use `--env-prefix` to namespace credential env vars per project:
+
+```sh
+# Project A
+export PROJECTA_USER=alice@example.com
+export PROJECTA_PASSPHRASE=secret_a
+pprotect decrypt-domain prod --env-prefix PROJECTA
+
+# Project B (simultaneously)
+export PROJECTB_USER=bob@example.com
+export PROJECTB_PASSPHRASE=secret_b
+pprotect decrypt-domain staging --env-prefix PROJECTB
+```
+
+The default prefix remains `PPROTECT`, so existing workflows are unaffected.
+When using `pprotect exec` with a custom prefix, both the custom prefix vars
+and the default `PPROTECT_*` vars are scrubbed from the child process.
+
 
 See our
-[User Guide](https://github.com/SimpleLegal/pocket_protector/blob/master/USER_GUIDE.md)
+[User Guide](https://github.com/mahmoud/pocket_protector/blob/master/USER_GUIDE.md)
 for more usage tips.
 
 
@@ -124,6 +152,8 @@ Commands:
   add-secret            add a secret to a specified domain
   decrypt-domain        decrypt and display JSON-formatted cleartext for a
                         domain
+  exec                  run a command with decrypted secrets injected as
+                        environment variables
   init                  create a new pocket-protected file
   list-all-secrets      display all secrets, with a list of domains the key is
                         present in
@@ -133,6 +163,10 @@ Commands:
   list-domains          display a list of available domains
   list-user-secrets     similar to list-all-secrets, but filtered by a given
                         user
+  migrate-owner         migrate all domain ownerships from one custodian to
+                        another
+  rekey-custodian       re-encrypt a custodian's key with a new passphrase
+                        and/or KDF
   rm-domain             remove a domain from the protected
   rm-owner              remove an owner's privileges on a specified domain
   rm-secret             remove a secret from a specified domain
@@ -141,7 +175,91 @@ Commands:
   set-key-custodian-passphrase
                         change a key custodian passphrase
   update-secret         update an existing secret in a specified domain
+  version               display the current version
 ```
+
+
+## Agent & Automation Security
+
+Pocket Protector is commonly used in CI/CD pipelines and increasingly
+alongside AI coding agents. In these contexts, secret hygiene matters
+more than usual. Any process with shell access can read environment
+variables, `cat .env`, or inspect `/proc/*/environ`.
+
+### Credential injection: from safest to weakest
+
+1. **`pprotect exec`** (safest): decrypts a domain and injects
+   secrets as env vars into a child process. The custodian passphrase
+   is scrubbed from the child environment. Secrets exist only in the
+   child process memory, never on disk or in the parent env.
+
+   ```sh
+   pprotect exec --domain prod -- ./myapp --flag arg
+   ```
+
+2. **`--passphrase-file`** from a restricted mount: store the
+   passphrase on a tmpfs or Docker secret mount with `0400`
+   permissions. Keeps the passphrase off the command line and out of
+   the process environment.
+
+   ```sh
+   pprotect decrypt-domain prod --passphrase-file /run/secrets/pp_pass
+   ```
+
+3. **`PPROTECT_PASSPHRASE` env var** (simplest): the classic option
+   but not the safest. Readable by any subprocess, including AI agents, build
+   scripts, and debug tooling. Use only when other options are not
+   available.
+
+### Output formats for `decrypt-domain`
+
+`decrypt-domain` supports `--output-format json` (default), `--output-format env`
+(dotenv-style), and `--output-format shell` (`eval`-able exports). Use
+`--secret SECRET_NAME` to extract a single value.
+
+Secret names are case-sensitive and stored exactly as provided. The
+validation rule is: start with a letter, then ASCII letters, digits,
+hyphens, or underscores (e.g. `db-pass`, `API_KEY`, `tls-cert`).
+
+```sh
+# JSON (default)
+pprotect decrypt-domain prod
+
+# .env format
+pprotect decrypt-domain prod --output-format env
+
+# Shell export format
+eval $(pprotect decrypt-domain prod --output-format shell)
+
+# Single secret, raw value (name must match exactly)
+db_pass=$(pprotect decrypt-domain prod --secret db-pass)
+```
+
+### What Pocket Protector is not
+
+Pocket Protector manages **static deploy-time secrets** -- database
+passwords, API keys, TLS certificates. It is not a runtime credential
+manager. For dynamic credentials (OAuth tokens, short-lived sessions,
+PKCE flows), use a runtime credential manager alongside Pocket
+Protector.
+
+Other explicit non-goals:
+
+* **Network daemon / SaaS mode** -- serverless is the value prop
+* **Time-limited credentials** -- no clock-based expiry; use
+  `pprotect exec` to limit secret lifetime to a process
+* **Per-secret access control** -- domains are the access boundary
+* **MCP server mode** -- use `pprotect exec` to inject secrets into
+  MCP server processes at startup
+
+### Security note on `pprotect exec`
+
+An agent or process that can run arbitrary commands could call
+`pprotect decrypt-domain` directly. `exec` reduces *accidental*
+exposure (logged output, env dumps, process listings), not adversarial
+exfiltration by a fully compromised agent. Defense in depth still
+applies: restrict filesystem access, use scoped custodians, and audit
+the protected.yaml change log.
 
 
 ## Design
