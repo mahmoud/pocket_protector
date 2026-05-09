@@ -1,6 +1,7 @@
 import os
 import json
 import subprocess
+import shlex
 import sys
 
 import ruamel.yaml
@@ -522,8 +523,8 @@ def test_decrypt_domain_format_env(tmp_path, _fast_crypto):
     lines = res.stdout.strip().splitlines()
     assert len(lines) == 2
     # sorted by name: API_KEY before DB_PASS
-    assert lines[0] == 'API_KEY="key123"'
-    assert lines[1] == 'DB_PASS="my secret"'
+    assert lines[0] == 'API_KEY=key123'
+    assert lines[1] == "DB_PASS='my secret'"
 
 
 def test_decrypt_domain_format_shell(tmp_path, _fast_crypto):
@@ -541,7 +542,7 @@ def test_decrypt_domain_format_shell(tmp_path, _fast_crypto):
     res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'shell', DOMAIN_NAME])
     lines = res.stdout.strip().splitlines()
     assert len(lines) == 1
-    assert lines[0] == 'export DB_PASS="val with spaces"'
+    assert lines[0] == "export DB_PASS='val with spaces'"
 
 
 def test_decrypt_domain_format_env_special_chars(tmp_path, _fast_crypto):
@@ -557,12 +558,29 @@ def test_decrypt_domain_format_env_special_chars(tmp_path, _fast_crypto):
     cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'TRICKY', 'has"quotes\\and=equals'])
 
     res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'env', DOMAIN_NAME])
-    # Value should have " escaped to \" and \\ escaped to \\\\
-    assert res.stdout.strip() == 'TRICKY="has\\"quotes\\\\and=equals"'
+    # Value should be single-quoted by shlex.quote
+    assert res.stdout.strip() == "TRICKY='has\"quotes\\and=equals'"
 
 
-def test_decrypt_domain_format_env_invalid_name_warns(tmp_path, _fast_crypto):
-    """Test that secret names that aren't valid shell identifiers produce a warning."""
+def test_decrypt_domain_format_env_shell_metacharacters(tmp_path, _fast_crypto):
+    """Test env format safely handles shell metacharacters ($, `, newline) in values."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'DB_PASS', 'p@ss$word`id`'])
+
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'env', DOMAIN_NAME])
+    # shlex.quote wraps in single quotes; value is preserved literally
+    assert res.stdout.strip() == "DB_PASS='p@ss$word`id`'"
+
+
+def test_decrypt_domain_format_env_invalid_name_errors(tmp_path, _fast_crypto):
+    """Test that secret names that aren't valid shell identifiers produce an error."""
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
     protected_path = _fwd(tmp_path / 'protected.yaml')
@@ -573,11 +591,9 @@ def test_decrypt_domain_format_env_invalid_name_warns(tmp_path, _fast_crypto):
     cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
     cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'has-hyphens', 'val'])
 
-    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'env', DOMAIN_NAME])
-    assert 'warning' in res.stderr.lower()
+    res = cc.fail_1(['pprotect', 'decrypt-domain', '--output-format', 'env', DOMAIN_NAME])
+    assert 'not a valid shell identifier' in res.stderr
     assert 'has-hyphens' in res.stderr
-    # Still outputs the value despite the warning
-    assert 'has-hyphens="val"' in res.stdout
 
 
 def test_decrypt_domain_secret_raw(tmp_path, _fast_crypto):
@@ -625,11 +641,11 @@ def test_decrypt_domain_secret_shell(tmp_path, _fast_crypto):
     kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
     cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
     cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
-    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'DB_PASS', SECRET_VALUE])
 
     res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'shell',
-                  '--secret', SECRET_NAME, DOMAIN_NAME])
-    assert res.stdout.strip() == 'export %s="%s"' % (SECRET_NAME, SECRET_VALUE)
+                  '--secret', 'DB_PASS', DOMAIN_NAME])
+    assert res.stdout.strip() == 'export DB_PASS=%s' % shlex.quote(SECRET_VALUE)
 
 
 def test_decrypt_domain_secret_not_found(tmp_path, _fast_crypto):

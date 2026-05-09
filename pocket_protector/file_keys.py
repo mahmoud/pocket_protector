@@ -24,7 +24,7 @@ from boltons.dictutils import OMD
 from boltons.fileutils import atomic_save
 
 
-_VALID_NAME_RE = re.compile(r"^[A-z][-_A-z0-9]*\Z")
+_VALID_NAME_RE = re.compile(r"^[A-Za-z][-_A-Za-z0-9]*\Z")
 
 
 class PPError(Exception):
@@ -59,7 +59,7 @@ _FILE_SCHEMA = schema.Schema(_as_d(
             "owners": _as_d({str: str}),
             "public-key": str,
         }),
-        schema.Optional(schema.Regex("secret-.*")): str,
+        schema.Optional(schema.Regex("^secret-[A-Za-z][-_A-Za-z0-9]*$")): str,
     }),
 }))
 
@@ -159,7 +159,9 @@ class _KeyCustodian(object):
 
     def decrypt_as(self, creds, bytes):
         'decrypt the passed bytes that were encrypted for this key-custodian'
-        assert creds.name == self.name
+        if creds.name != self.name:
+            raise PPError('credential name mismatch: expected %r, got %r'
+                          % (self.name, creds.name))
         if self._raw_key:
             key_bytes = _kdf_raw(creds, self._salt)
         else:
@@ -320,8 +322,8 @@ class _EncryptedKeyDomain(object):
         name_match = _VALID_NAME_RE.match(name)
         if not name_match:
             raise ValueError('valid secret names must begin with a letter, and'
-                             ' consist only of ASCII letters, digits, and'
-                             ' underscores, not: %r' % name)
+                             ' consist only of ASCII letters, digits,'
+                             ' hyphens, and underscores, not: %r' % name)
 
         secrets = dict(self._secrets)
         box = nacl.public.SealedBox(self._pub_key)

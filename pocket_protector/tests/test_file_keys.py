@@ -447,3 +447,18 @@ def test_truncate_audit_log_no_op(_fast_crypto):
     # kf has 2 log entries (create + add_key_custodian)
     result = kf.truncate_audit_log(100)
     assert result is kf
+
+
+def test_valid_name_re_rejects_az_range_extras():
+    """Verify _VALID_NAME_RE rejects chars that [A-z] incorrectly matched."""
+    from pocket_protector.file_keys import _VALID_NAME_RE
+    # These are ASCII 91-96, between Z(90) and a(97)
+    for bad_char in ['[', '\\', ']', '^', '`']:
+        name = bad_char + 'test'
+        assert _VALID_NAME_RE.match(name) is None, 'should reject name starting with %r' % bad_char
+        name = 'a' + bad_char
+        assert _VALID_NAME_RE.match(name) is None, 'should reject name containing %r' % bad_char
+    # Valid names still work
+    assert _VALID_NAME_RE.match('validName')
+    assert _VALID_NAME_RE.match('also-valid')
+    assert _VALID_NAME_RE.match('and_this_123')

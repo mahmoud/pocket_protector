@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import json
+import shlex
 import difflib
 
 from face import Command, Flag, face_middleware, CommandLineError, UsageError, echo, prompt
@@ -79,7 +80,7 @@ def _get_creds(kf,
     if passphrase_file:
         passphrase_file = os.path.abspath(passphrase_file)
         try:
-            passphrase = open(passphrase_file, 'rb').read().decode('utf8')
+            passphrase = open(passphrase_file, 'rb').read().decode('utf8').strip()
         except IOError as ioe:
             if getattr(ioe, 'strerror', None):
                 msg = '%s while reading passphrase from file at "%s"' % (ioe.strerror, passphrase_file)
@@ -400,10 +401,8 @@ def _validate_output_format(output_format):
 
 
 def _format_secret_env(name, value):
-    """Format a single name=value pair with double-quoting for safety."""
-    # Escape backslashes and double-quotes inside the value
-    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
-    return '%s="%s"' % (name, escaped)
+    """Format a single name=value pair, shell-safe via single-quoting."""
+    return '%s=%s' % (name, shlex.quote(value))
 
 
 """
@@ -441,7 +440,8 @@ def decrypt_domain(kf, creds, domain_name, output_format=None, secret=None):
         items = {secret: decrypted_dict[secret]} if secret else decrypted_dict
         for name in sorted(items):
             if not _VALID_SHELL_IDENTIFIER.match(name):
-                echo.err('warning: %r is not a valid shell identifier' % name)
+                raise UsageError('%r is not a valid shell identifier;'
+                                 ' cannot safely represent in env/shell format' % name)
             echo(prefix + _format_secret_env(name, items[name]))
 
     return 0
