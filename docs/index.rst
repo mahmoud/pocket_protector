@@ -39,6 +39,13 @@ require infrastructure you have to operate. PocketProtector gives you both:
 secrets live encrypted in your repo, versioned alongside code, with no
 server to run. See :doc:`why` for the full argument.
 
+.. raw:: html
+
+   <div style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; max-width: 100%; margin: 1.5em 0;">
+     <iframe src="https://www.youtube.com/embed/7Zhxu_4qhyM" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;" frameborder="0" allowfullscreen></iframe>
+   </div>
+
+
 .. toctree::
    :maxdepth: 2
    :caption: Getting Started
