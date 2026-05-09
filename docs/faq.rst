@@ -77,6 +77,30 @@ PocketProtector encrypts everything. The file *should* be committed.
 Secret changes are git commits with timestamps and authorship.
 
 
+Why not just use environment variables?
+--------------------------------------------
+
+Environment variables are the twelve-factor app recommendation, and they
+work. But they have scaling problems:
+
+* Each secret is a separate variable to configure per environment.
+  Across dozens of secrets and dozens of environments, you lose track.
+* Each variable is a separate thing that can leak. A stack trace, an
+  ``os.environ`` dump in a debug log, a ``docker inspect`` call: any
+  one can expose a secret.
+* Environment variables offer no audit trail. You cannot see who set
+  what, when, or why.
+* You still need a way to get the variables there. Someone has to paste
+  them into the CI config, the Heroku dashboard, the docker-compose file.
+  That process is the real secret management problem, and environment
+  variables do not solve it.
+
+PocketProtector reduces the bootstrap to a single passphrase per domain.
+That passphrase unlocks all secrets in the domain. The secrets themselves
+are versioned in the repo, with a built-in audit log. You manage one
+credential instead of dozens.
+
+
 How does this compare to HashiCorp Vault?
 ------------------------------------------
 

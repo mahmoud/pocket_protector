@@ -34,11 +34,16 @@ Quick start::
 Each command prompts for credentials when necessary. When done, simply
 ``git commit`` to save changes to your secret store.
 
+Most secret management tools either sacrifice security for convenience, or
+require infrastructure you have to operate. PocketProtector gives you both:
+secrets live encrypted in your repo, versioned alongside code, with no
+server to run. See :doc:`why` for the full argument.
 
 .. toctree::
    :maxdepth: 2
    :caption: Getting Started
 
+   why
    installation
    tutorial
 
