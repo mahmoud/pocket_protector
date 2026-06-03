@@ -1011,3 +1011,76 @@ def test_exec_subprocess_custom_prefix(tmp_path, _fast_crypto):
     assert 'PPROTECT_USER' not in child_env
     assert 'MYAPP_USER' not in child_env
     assert 'MYAPP_PASSPHRASE' not in child_env
+
+
+def test_env_prefix_from_env_var(tmp_path, _fast_crypto, monkeypatch):
+    """PPROTECT_ENV_PREFIX env var sets the default for --env-prefix."""
+    monkeypatch.setenv('PPROTECT_ENV_PREFIX', 'MYAPP')
+    monkeypatch.setenv('MYAPP_USER', KURT_EMAIL)
+    monkeypatch.setenv('MYAPP_PASSPHRASE', KURT_PHRASE)
+    # Build a fresh command so the missing= default picks up the env var
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, chdir=str(tmp_path), reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'],
+           input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    # No --env-prefix flag: should use MYAPP from PPROTECT_ENV_PREFIX
+    res = cc.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_env_prefix_cli_overrides_env_var(tmp_path, _fast_crypto, monkeypatch):
+    """--env-prefix CLI flag takes precedence over PPROTECT_ENV_PREFIX."""
+    monkeypatch.setenv('PPROTECT_ENV_PREFIX', 'MYAPP')
+    monkeypatch.setenv('OTHER_USER', KURT_EMAIL)
+    monkeypatch.setenv('OTHER_PASSPHRASE', KURT_PHRASE)
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, chdir=str(tmp_path), reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    cc.run(['pprotect', 'add-domain', '--env-prefix', 'OTHER'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'],
+           input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    # Explicit --env-prefix OTHER should override PPROTECT_ENV_PREFIX=MYAPP
+    res = cc.run(['pprotect', 'decrypt-domain', '--env-prefix', 'OTHER', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_env_prefix_provenance_in_error(tmp_path, _fast_crypto, monkeypatch):
+    """Error messages reference custom-prefixed env vars when PPROTECT_ENV_PREFIX is set."""
+    monkeypatch.setenv('PPROTECT_ENV_PREFIX', 'MYAPP')
+    monkeypatch.setenv('MYAPP_USER', 'bad@user')
+    monkeypatch.setenv('MYAPP_PASSPHRASE', 'wrong')
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, chdir=str(tmp_path), reraise=False)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    # Init with valid creds via stdin (ignoring the env for init)
+    cc_init = CommandChecker(cmd, reraise=True)
+    cc_init.run('pprotect init --file %s' % protected_path,
+                input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    # Try decrypt with bad creds from MYAPP_* env vars, non-interactive
+    res = cc.run(['pprotect', 'decrypt-domain', '--non-interactive',
+                  '--file', protected_path, DOMAIN_NAME], exit_code=None)
+    assert res.exit_code != 0
+    assert 'env var: MYAPP_USER' in res.stderr
+    assert 'env var: MYAPP_PASSPHRASE' in res.stderr
+
+
+def test_env_prefix_env_var_scrubbed_from_exec():
+    """PPROTECT_ENV_PREFIX is scrubbed from child process env in _build_exec_env."""
+    base = {
+        'PATH': '/usr/bin',
+        'PPROTECT_ENV_PREFIX': 'MYAPP',
+        'PPROTECT_PASSPHRASE': 'leaked',
+        'PPROTECT_USER': 'leaked@user',
+    }
+    secrets = {'DB_PASS': 'ok'}
+    result = cli._build_exec_env(secrets, base_env=base)
+    assert 'PPROTECT_ENV_PREFIX' not in result
+    assert 'PPROTECT_PASSPHRASE' not in result
+    assert 'PPROTECT_USER' not in result
+    assert result['DB_PASS'] == 'ok'

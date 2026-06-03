@@ -108,6 +108,9 @@ options, highlighted here:
   * `PPROTECT_PASSPHRASE` - environment variable which contains the
     passphrase (useful for environment variable-based key management,
     used by AWS/Heroku/many CI systems)
+  * `PPROTECT_ENV_PREFIX` - sets the default `--env-prefix` without
+    needing the flag (e.g., `PPROTECT_ENV_PREFIX=MYAPP` makes
+    credential lookup use `MYAPP_USER` and `MYAPP_PASSPHRASE`)
 
 In all cases, flags take precedence over environment variables, and
 both take precedence over and bypass interactive prompts. In the event
@@ -132,7 +135,18 @@ pprotect decrypt-domain staging --env-prefix PROJECTB
 ```
 
 The default prefix remains `PPROTECT`, so existing workflows are unaffected.
-When using `pprotect exec` with a custom prefix, both the custom prefix vars
+You can also set `PPROTECT_ENV_PREFIX` in your environment to avoid repeating
+the flag on every invocation:
+
+```sh
+export PPROTECT_ENV_PREFIX=PROJECTA
+export PROJECTA_USER=alice@example.com
+export PROJECTA_PASSPHRASE=secret_a
+pprotect decrypt-domain prod   # uses PROJECTA_USER / PROJECTA_PASSPHRASE
+```
+
+The `--env-prefix` flag always takes precedence over `PPROTECT_ENV_PREFIX`.
+When using `pprotect exec`, both the custom prefix vars
 and the default `PPROTECT_*` vars are scrubbed from the child process.
 
 

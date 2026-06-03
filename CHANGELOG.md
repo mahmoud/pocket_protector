@@ -16,6 +16,7 @@ summarized and readable.
 * Add exec subcommand for injecting secrets into subprocess environments
 * Add output format options (env, shell, json, raw) for decrypt-domain
 * Add --env-prefix flag for configurable credential environment variable prefix
+* Add PPROTECT_ENV_PREFIX env var for setting --env-prefix default
 * Add secret name filter for decrypt-domain
 * Add v2 raw-key custodians with hex passphrase support
 * Add per-custodian KDF parameters (sensitive, interactive)

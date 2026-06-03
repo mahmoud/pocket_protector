@@ -171,8 +171,9 @@ def _get_cmd(prepare=False):
             doc='convert secret names to UPPER_CASE env var names (exec only)')
     cmd.add('--no-passthrough', parse_as=True,
             doc='exec with clean env: secrets + PATH/HOME/TERM/LANG only')
-    cmd.add('--env-prefix', missing=DEFAULT_ENV_PREFIX,
-            doc='env var prefix for USER and PASSPHRASE credentials (default: PPROTECT)')
+    cmd.add('--env-prefix', missing=os.getenv('PPROTECT_ENV_PREFIX', DEFAULT_ENV_PREFIX),
+            doc='env var prefix for USER and PASSPHRASE credentials'
+                ' (default: PPROTECT, overridable via PPROTECT_ENV_PREFIX env var)')
 
     # add middlewares, outermost first ("first added, first called")
     cmd.add(mw_verify_creds)
@@ -451,7 +452,7 @@ def decrypt_domain(kf, creds, domain_name, output_format=None, secret=None):
 _PASSTHROUGH_VARS = ('PATH', 'HOME', 'TERM', 'LANG', 'USER', 'SHELL', 'LOGNAME')
 
 # Env vars scrubbed from the child process unconditionally
-_SCRUBBED_VARS = ('PPROTECT_PASSPHRASE', 'PPROTECT_USER')
+_SCRUBBED_VARS = ('PPROTECT_PASSPHRASE', 'PPROTECT_USER', 'PPROTECT_ENV_PREFIX')
 
 
 def _transform_secret_name(name, prefix=None, uppercase=False):

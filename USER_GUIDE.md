@@ -416,7 +416,8 @@ Passphrase:
   environment.
 
 **Security note:** `exec` scrubs `PPROTECT_USER`, `PPROTECT_PASSPHRASE`,
-and any custom `--env-prefix` variables from the child process environment.
+`PPROTECT_ENV_PREFIX`, and any custom `--env-prefix` variables from the
+child process environment.
 On Unix, `exec` replaces the current process entirely (`os.execvpe`), so
 the passphrase never lingers in a parent shell. On Windows, it uses
 `subprocess.run` instead.
@@ -493,13 +494,30 @@ pprotect decrypt-domain staging --env-prefix PROJECTB
 The default prefix remains `PPROTECT`, so existing workflows are
 unaffected.
 
+To avoid repeating `--env-prefix` on every invocation, set the
+`PPROTECT_ENV_PREFIX` environment variable:
+
+```sh
+export PPROTECT_ENV_PREFIX=PROJECTA
+export PROJECTA_USER=alice@example.com
+export PROJECTA_PASSPHRASE=secret_a
+pprotect decrypt-domain prod   # uses PROJECTA_USER / PROJECTA_PASSPHRASE
+```
+
+The resolution order for the prefix is:
+
+1. `--env-prefix` CLI flag (explicit wins)
+2. `PPROTECT_ENV_PREFIX` environment variable
+3. `PPROTECT` (hardcoded default)
+
 ### Credential sources
 
 PocketProtector resolves credentials in this order:
 
 1. **Command-line flags**: `-u / --user`, `--passphrase-file`
 2. **Environment variables**: `PPROTECT_USER`, `PPROTECT_PASSPHRASE`
-   (or custom prefix equivalents)
+   (or custom prefix equivalents via `--env-prefix` /
+   `PPROTECT_ENV_PREFIX`)
 3. **Interactive prompt** (unless `--non-interactive` is set)
 
 Flags take precedence over environment variables, and both bypass
