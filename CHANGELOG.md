@@ -9,6 +9,14 @@ scheme (`YY.MINOR.MICRO`).
 Check this page when upgrading, we strive to keep the updates
 summarized and readable.
 
+26.1.0
+------
+*(June 3, 2026)*
+
+* Add PPROTECT_ENV_PREFIX env var for setting --env-prefix default
+* Tighten shell escaping and secret name validation
+* Documentation improvements: new 'Why PocketProtector' page, ReadTheDocs setup
+
 26.0.0
 ------
 *(May 8, 2026)*
@@ -16,7 +24,6 @@ summarized and readable.
 * Add exec subcommand for injecting secrets into subprocess environments
 * Add output format options (env, shell, json, raw) for decrypt-domain
 * Add --env-prefix flag for configurable credential environment variable prefix
-* Add PPROTECT_ENV_PREFIX env var for setting --env-prefix default
 * Add secret name filter for decrypt-domain
 * Add v2 raw-key custodians with hex passphrase support
 * Add per-custodian KDF parameters (sensitive, interactive)
