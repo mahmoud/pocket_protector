@@ -9,12 +9,17 @@ scheme (`YY.MINOR.MICRO`).
 Check this page when upgrading, we strive to keep the updates
 summarized and readable.
 
+26.2.0
+------
+*(June 4, 2026)*
+
+* Add Creds.from_env() classmethod for reading credentials from environment
+
 26.1.0
 ------
 *(June 3, 2026)*
 
 * Add PPROTECT_ENV_PREFIX env var for setting --env-prefix default
-* Add Creds.from_env() classmethod for reading credentials from environment
 * Tighten shell escaping and secret name validation
 * Documentation improvements: new 'Why PocketProtector' page, ReadTheDocs setup
 
