@@ -14,6 +14,7 @@ summarized and readable.
 *(June 3, 2026)*
 
 * Add PPROTECT_ENV_PREFIX env var for setting --env-prefix default
+* Add Creds.from_env() classmethod for reading credentials from environment
 * Tighten shell escaping and secret name validation
 * Documentation improvements: new 'Why PocketProtector' page, ReadTheDocs setup
 

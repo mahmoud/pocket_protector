@@ -46,6 +46,13 @@ Creds
 * ``name_source`` (str or None) -- how the name was obtained (e.g., ``"stdin"``, ``"env var: PPROTECT_USER"``)
 * ``passphrase_source`` (str or None) -- how the passphrase was obtained
 
+.. classmethod:: Creds.from_env(prefix=None)
+
+   Create ``Creds`` from environment variables. If *prefix* is ``None``,
+   reads ``PPROTECT_ENV_PREFIX`` to determine the prefix, defaulting to
+   ``PPROTECT``. Returns ``Creds`` with ``name`` from ``{prefix}_USER``
+   and ``passphrase`` from ``{prefix}_PASSPHRASE`` (empty string if unset).
+
 
 PPError
 -------

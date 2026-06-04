@@ -462,3 +462,57 @@ def test_valid_name_re_rejects_az_range_extras():
     assert _VALID_NAME_RE.match('validName')
     assert _VALID_NAME_RE.match('also-valid')
     assert _VALID_NAME_RE.match('and_this_123')
+
+
+def test_creds_from_env_default(monkeypatch):
+    """Creds.from_env() reads PPROTECT_USER / PPROTECT_PASSPHRASE by default."""
+    monkeypatch.setenv('PPROTECT_USER', 'alice@example.com')
+    monkeypatch.setenv('PPROTECT_PASSPHRASE', 'secret123')
+    creds = file_keys.Creds.from_env()
+    assert creds.name == 'alice@example.com'
+    assert creds.passphrase == 'secret123'
+    assert creds.name_source == 'env var: PPROTECT_USER'
+    assert creds.passphrase_source == 'env var: PPROTECT_PASSPHRASE'
+
+
+def test_creds_from_env_custom_prefix(monkeypatch):
+    """Creds.from_env(prefix='MYAPP') reads MYAPP_USER / MYAPP_PASSPHRASE."""
+    monkeypatch.setenv('MYAPP_USER', 'bob@example.com')
+    monkeypatch.setenv('MYAPP_PASSPHRASE', 'hunter2')
+    creds = file_keys.Creds.from_env(prefix='MYAPP')
+    assert creds.name == 'bob@example.com'
+    assert creds.passphrase == 'hunter2'
+    assert creds.name_source == 'env var: MYAPP_USER'
+    assert creds.passphrase_source == 'env var: MYAPP_PASSPHRASE'
+
+
+def test_creds_from_env_prefix_from_env_var(monkeypatch):
+    """Creds.from_env() respects PPROTECT_ENV_PREFIX when no prefix arg given."""
+    monkeypatch.setenv('PPROTECT_ENV_PREFIX', 'PROJ')
+    monkeypatch.setenv('PROJ_USER', 'carol@example.com')
+    monkeypatch.setenv('PROJ_PASSPHRASE', 'p4ss')
+    creds = file_keys.Creds.from_env()
+    assert creds.name == 'carol@example.com'
+    assert creds.passphrase == 'p4ss'
+    assert creds.name_source == 'env var: PROJ_USER'
+    assert creds.passphrase_source == 'env var: PROJ_PASSPHRASE'
+
+
+def test_creds_from_env_explicit_prefix_overrides_env_var(monkeypatch):
+    """Explicit prefix= arg takes precedence over PPROTECT_ENV_PREFIX."""
+    monkeypatch.setenv('PPROTECT_ENV_PREFIX', 'IGNORED')
+    monkeypatch.setenv('REAL_USER', 'dave@example.com')
+    monkeypatch.setenv('REAL_PASSPHRASE', 'correct')
+    creds = file_keys.Creds.from_env(prefix='REAL')
+    assert creds.name == 'dave@example.com'
+    assert creds.passphrase == 'correct'
+
+
+def test_creds_from_env_missing_vars(monkeypatch):
+    """Creds.from_env() returns empty strings when env vars are unset."""
+    monkeypatch.delenv('PPROTECT_USER', raising=False)
+    monkeypatch.delenv('PPROTECT_PASSPHRASE', raising=False)
+    monkeypatch.delenv('PPROTECT_ENV_PREFIX', raising=False)
+    creds = file_keys.Creds.from_env()
+    assert creds.name == ''
+    assert creds.passphrase == ''

@@ -233,20 +233,23 @@ When to use the CLI vs. the API:
 Passphrase management
 ---------------------
 
-In automation, passphrases typically come from environment variables:
+In automation, passphrases typically come from environment variables.
+The ``Creds.from_env()`` classmethod handles this:
 
 .. code-block:: python
 
-   import os
    from pocket_protector import Creds
 
-   creds = Creds(
-       name=os.environ['PPROTECT_USER'],
-       passphrase=os.environ['PPROTECT_PASSPHRASE'],
-       name_source='env var: PPROTECT_USER',
-       passphrase_source='env var: PPROTECT_PASSPHRASE',
-   )
+   # Reads PPROTECT_USER and PPROTECT_PASSPHRASE
+   creds = Creds.from_env()
 
-The ``name_source`` and ``passphrase_source`` fields are informational
-only -- they are used in error messages to help diagnose credential
-issues, but do not affect cryptographic operations.
+   # Or with a custom prefix (reads MYAPP_USER and MYAPP_PASSPHRASE)
+   creds = Creds.from_env(prefix='MYAPP')
+
+When ``prefix`` is not passed, ``from_env()`` checks the
+``PPROTECT_ENV_PREFIX`` environment variable before falling back to
+``PPROTECT``.
+
+The resulting ``Creds`` object has ``name_source`` and
+``passphrase_source`` set automatically, so error messages will
+reference the correct env var names.

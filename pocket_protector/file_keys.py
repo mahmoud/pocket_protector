@@ -86,6 +86,29 @@ class Creds(object):
     name_source = attr.ib(default=None)
     passphrase_source = attr.ib(default=None)
 
+    @classmethod
+    def from_env(cls, prefix=None):
+        """Create Creds from environment variables.
+
+        Args:
+            prefix: Env var prefix (e.g. 'MYAPP' reads MYAPP_USER / MYAPP_PASSPHRASE).
+                    If None, falls back to PPROTECT_ENV_PREFIX env var, then 'PPROTECT'.
+
+        Returns:
+            Creds with name and passphrase from env vars, or empty strings if unset.
+            name_source and passphrase_source record which env vars were consulted.
+        """
+        if prefix is None:
+            prefix = os.getenv('PPROTECT_ENV_PREFIX', 'PPROTECT')
+        user_var = prefix + '_USER'
+        pass_var = prefix + '_PASSPHRASE'
+        return cls(
+            name=os.getenv(user_var, ''),
+            passphrase=os.getenv(pass_var, ''),
+            name_source='env var: %s' % user_var,
+            passphrase_source='env var: %s' % pass_var,
+        )
+
 
 def _kdf(creds, salt, opslimit=None, memlimit=None):
     name = creds.name.encode('utf8')
