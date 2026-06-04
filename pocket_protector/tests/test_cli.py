@@ -1084,3 +1084,135 @@ def test_env_prefix_env_var_scrubbed_from_exec():
     assert 'PPROTECT_PASSPHRASE' not in result
     assert 'PPROTECT_USER' not in result
     assert result['DB_PASS'] == 'ok'
+
+
+# --- .env file support tests ---
+
+
+def test_env_vars_from_text():
+    """Unit test for EnvVars.from_text: comments, blanks, quotes, export, equals in values."""
+    text = '\n'.join([
+        '# comment line',
+        '',
+        'SIMPLE=value',
+        'export EXPORTED=exported_val',
+        "SINGLE_QUOTED='quoted value'",
+        'DOUBLE_QUOTED="double quoted"',
+        'HAS_EQUALS=key=val=more',
+        'WHITESPACE =  padded  ',
+        'MALFORMED_NO_EQUALS',
+        'EMPTY_VAL=',
+    ])
+    result = cli.EnvVars.from_text(text, source='test')
+    assert result['SIMPLE'] == 'value'
+    assert result['EXPORTED'] == 'exported_val'
+    assert result['SINGLE_QUOTED'] == 'quoted value'
+    assert result['DOUBLE_QUOTED'] == 'double quoted'
+    assert result['HAS_EQUALS'] == 'key=val=more'
+    assert result['WHITESPACE'] == 'padded'
+    assert 'MALFORMED_NO_EQUALS' not in result
+    assert result['EMPTY_VAL'] == ''
+    assert result.source == 'test'
+
+
+def test_env_vars_from_file(tmp_path):
+    """EnvVars.from_file reads and parses, setting source to the path."""
+    env_path = tmp_path / '.env'
+    env_path.write_text('KEY=val\n')
+    result = cli.EnvVars.from_file(str(env_path))
+    assert result['KEY'] == 'val'
+    assert result.source == str(env_path)
+
+
+def test_env_vars_direct():
+    """EnvVars constructed directly supports in/[] and bool."""
+    ev = cli.EnvVars({'A': '1', 'B': '2'})
+    assert 'A' in ev
+    assert ev['A'] == '1'
+    assert 'C' not in ev
+    assert bool(ev) is True
+    assert bool(cli.EnvVars({})) is False
+
+
+def _setup_protected(tmp_path, cc):
+    """Helper: create a protected.yaml with KURT as custodian, a domain, and a secret."""
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc2 = CommandChecker(cc.cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc2.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc2.run(['pprotect', 'add-secret'],
+            input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+    return protected_path
+
+
+def test_env_file_auto_discover(tmp_path, _fast_crypto):
+    """Auto-discovered .env next to protected.yaml provides credentials."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    # Write .env next to protected.yaml
+    (tmp_path / '.env').write_text(
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE))
+    # No env vars, non-interactive — .env should supply creds
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+    res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_env_file_explicit_path(tmp_path, _fast_crypto):
+    """--env-file with an explicit path loads creds from that file."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    # Put .env in a different directory
+    other_dir = tmp_path / 'other'
+    other_dir.mkdir()
+    env_path = other_dir / 'my.env'
+    env_path.write_text(
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE))
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+    res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive',
+                   '--env-file', _fwd(env_path), DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_env_file_no_override_real_env(tmp_path, _fast_crypto):
+    """Real environment variables take precedence over .env file values."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    # .env has WRONG passphrase, real env has correct one
+    (tmp_path / '.env').write_text(
+        'PPROTECT_USER=wrong@example.com\nPPROTECT_PASSPHRASE=wrongpass\n')
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_no_env_file_flag(tmp_path, _fast_crypto):
+    """--no-env-file suppresses .env auto-discovery; falls through to error."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    (tmp_path / '.env').write_text(
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE))
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+    # With --no-env-file, the .env is ignored; non-interactive + no env = fail
+    res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive',
+                    '--no-env-file', DOMAIN_NAME])
+    # Should fail because no credentials source remains
+    assert res.exit_code != 0
+
+
+def test_env_file_missing_explicit_errors(tmp_path, _fast_crypto):
+    """--env-file pointing to a nonexistent path raises UsageError."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+    res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive',
+                    '--env-file', _fwd(tmp_path / 'nonexistent.env'), DOMAIN_NAME])
+    assert 'env file not found' in res.stderr
