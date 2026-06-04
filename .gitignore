@@ -45,3 +45,6 @@ pip-log.txt
 .cache/
 .venv/
 venv/
+
+# Environment files
+.env
