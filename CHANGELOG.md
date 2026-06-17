@@ -13,6 +13,8 @@ summarized and readable.
 ----------------------
 
 * Add Creds.from_env() classmethod for reading credentials from environment
+* Organize CLI subcommands into groups (Access Management, Domain Management,
+  Secret Management, Secret Access) for clearer ``--help`` output
 
 26.1.0
 ------
