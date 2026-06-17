@@ -122,6 +122,16 @@ custodian's email and passphrase.
 With ``--key-type raw``, a 256-bit hex key is generated and displayed.
 You must type ``YES`` to confirm you have saved it.
 
+list-user-secrets
+"""""""""""""""""
+
+.. code-block:: bash
+
+   pprotect list-user-secrets [-u EMAIL]
+
+Display the domains and secrets accessible to the authenticated user.
+Requires authentication.
+
 set-key-custodian-passphrase
 """"""""""""""""""""""""""""
 
@@ -149,16 +159,6 @@ human passphrase to an automated raw key for CI/CD.
 All domain ownerships are preserved and re-encrypted with the new key
 material.
 
-list-user-secrets
-"""""""""""""""""
-
-.. code-block:: bash
-
-   pprotect list-user-secrets [-u EMAIL]
-
-Display the domains and secrets accessible to the authenticated user.
-Requires authentication.
-
 Domain Management
 ~~~~~~~~~~~~~~~~~
 
@@ -173,16 +173,6 @@ Add a new domain to the protected. Requires authentication as an
 existing key custodian, who becomes the initial owner of the domain.
 Prompts for the domain name.
 
-rm-domain
-"""""""""
-
-.. code-block:: bash
-
-   pprotect rm-domain [-u EMAIL]
-
-Remove a domain and all of its secrets from the protected. Prompts for
-the domain name. This operation is irreversible (use VCS to undo).
-
 add-owner
 """""""""
 
@@ -195,20 +185,14 @@ be a key custodian. The authenticated user must already own the domain.
 
 Prompts for the domain name and new owner email.
 
-rm-owner
-""""""""
+list-domains
+""""""""""""
 
 .. code-block:: bash
 
-   pprotect rm-owner [-u EMAIL]
+   pprotect list-domains
 
-Remove an owner from a domain. The domain must retain at least one
-owner. Prompts for the domain name and owner email to remove.
-
-.. note::
-
-   After removing an owner, you should ``rotate-domain-keys`` to
-   ensure the removed owner's old keys can no longer decrypt secrets.
+Display all domain names in the protected, one per line.
 
 rotate-domain-keys
 """"""""""""""""""
@@ -238,14 +222,30 @@ authenticated user. Prompts for the new owner email and confirmation.
 
 Does not remove the original owner -- that is a separate step.
 
-list-domains
-""""""""""""
+rm-owner
+""""""""
 
 .. code-block:: bash
 
-   pprotect list-domains
+   pprotect rm-owner [-u EMAIL]
 
-Display all domain names in the protected, one per line.
+Remove an owner from a domain. The domain must retain at least one
+owner. Prompts for the domain name and owner email to remove.
+
+.. note::
+
+   After removing an owner, you should ``rotate-domain-keys`` to
+   ensure the removed owner's old keys can no longer decrypt secrets.
+
+rm-domain
+"""""""""
+
+.. code-block:: bash
+
+   pprotect rm-domain [-u EMAIL]
+
+Remove a domain and all of its secrets from the protected. Prompts for
+the domain name. This operation is irreversible (use VCS to undo).
 
 Secret Management
 ~~~~~~~~~~~~~~~~~
@@ -263,28 +263,6 @@ name, secret name, and secret value.
 
 Fails if the secret name already exists in the domain. Use
 ``update-secret`` to change an existing secret's value.
-
-update-secret
-"""""""""""""
-
-.. code-block:: bash
-
-   pprotect update-secret
-
-Update the value of an existing secret in a domain. Does not require
-authentication. Prompts for domain name, secret name, and new value.
-
-Fails if the secret does not exist. Use ``add-secret`` for new secrets.
-
-rm-secret
-"""""""""
-
-.. code-block:: bash
-
-   pprotect rm-secret
-
-Remove a secret from a domain. Does not require authentication. Prompts
-for domain name and secret name.
 
 list-domain-secrets
 """""""""""""""""""
@@ -308,6 +286,28 @@ followed by a colon and the domains that contain it::
 
    chat-api-key: dev
    mail-api-key: dev, prod
+
+update-secret
+"""""""""""""
+
+.. code-block:: bash
+
+   pprotect update-secret
+
+Update the value of an existing secret in a domain. Does not require
+authentication. Prompts for domain name, secret name, and new value.
+
+Fails if the secret does not exist. Use ``add-secret`` for new secrets.
+
+rm-secret
+"""""""""
+
+.. code-block:: bash
+
+   pprotect rm-secret
+
+Remove a secret from a domain. Does not require authentication. Prompts
+for domain name and secret name.
 
 Secret Access
 ~~~~~~~~~~~~~

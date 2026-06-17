@@ -170,29 +170,29 @@ Subcommands:
 
   Access Management:
     add-key-custodian   add a new key custodian to the protected
+    list-user-secrets   display domains and secrets accessible to the
+                        authenticated user
     set-key-custodian-passphrase
                         update a key custodian passphrase
     rekey-custodian     change a custodian key type (hard/fast/raw) and
                         passphrase, re-encrypting all owned domains
-    list-user-secrets   display domains and secrets accessible to the
-                        authenticated user
 
   Domain Management:
     add-domain          add a new domain to the protected
-    rm-domain           remove a domain and all of its keys from the protected
     add-owner           add a key custodian to the owner list of a specific domain
-    rm-owner            remove a key custodian from the owner list of a domain
+    list-domains        print a list of domain names, if any
     rotate-domain-keys  rotate the internal encryption keys for a given domain
     migrate-owner       grant a custodian ownership of all domains you own
-    list-domains        print a list of domain names, if any
+    rm-owner            remove a key custodian from the owner list of a domain
+    rm-domain           remove a domain and all of its keys from the protected
 
   Secret Management:
     add-secret          add a secret to a domain
-    update-secret       update a secret value in a domain
-    rm-secret           remove a secret from a domain
     list-domain-secrets print a list of secret names for a given domain
     list-all-secrets    print a list of all secret names, along with the
                         domains that define each
+    update-secret       update a secret value in a domain
+    rm-secret           remove a secret from a domain
 
   Secret Access:
     decrypt-domain      decrypt and display cleartext for a domain, with

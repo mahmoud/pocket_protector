@@ -186,35 +186,35 @@ def _get_cmd(prepare=False):
     cmd.add(print_version, name='version')
     cmd.add(list_audit_log)
 
-    # Access Management
+    # Access Management (create, list, update, misc, delete)
     access = CommandGroup('Access Management')
     access.add(add_key_custodian)
+    access.add(list_user_secrets)
     access.add(set_key_custodian_passphrase)
     access.add(rekey_custodian)
-    access.add(list_user_secrets)
     cmd.add(access)
 
-    # Domain Management
+    # Domain Management (create, list, read, update, misc, delete)
     domains = CommandGroup('Domain Management')
     domains.add(add_domain)
-    domains.add(rm_domain)
     domains.add(add_owner)
-    domains.add(rm_owner)
+    domains.add(list_domains)
     domains.add(rotate_domain_keys)
     domains.add(migrate_owner)
-    domains.add(list_domains)
+    domains.add(rm_owner)
+    domains.add(rm_domain)
     cmd.add(domains)
 
-    # Secret Management
+    # Secret Management (create, list, update, delete)
     secrets = CommandGroup('Secret Management')
     secrets.add(add_secret)
-    secrets.add(update_secret)
-    secrets.add(rm_secret)
     secrets.add(list_domain_secrets, posargs={'count': 1, 'provides': 'domain_name'})
     secrets.add(list_all_secrets)
+    secrets.add(update_secret)
+    secrets.add(rm_secret)
     cmd.add(secrets)
 
-    # Secret Access
+    # Secret Access (read, misc)
     secret_access = CommandGroup('Secret Access')
     secret_access.add(decrypt_domain, posargs={'count': 1, 'provides': 'domain_name'})
     secret_access.add(exec_command, name='exec', post_posargs=True)
