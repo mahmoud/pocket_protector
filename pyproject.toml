@@ -53,6 +53,12 @@ dev = [
     "tox-uv>=1",
 ]
 
+[tool.uv.sources]
+face = { path = "../face", editable = true }
+
+[tool.uv]
+environments = ["python_version >= '3.10'"]
+
 [tool.flit.sdist]
 include = ["pocket_protector/tests/", "tox.ini", "LICENSE.txt", "README.md", "CHANGELOG.md", "USER_GUIDE.md"]
 
