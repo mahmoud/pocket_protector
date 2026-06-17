@@ -279,20 +279,10 @@ wheels = [
 
 [[package]]
 name = "face"
-source = { editable = "../face" }
+version = "26.0.1.dev0"
+source = { git = "https://github.com/mahmoud/face.git?branch=master#25c93c813d917b152b4370c2507b9cab8f622a56" }
 dependencies = [
     { name = "boltons", marker = "python_full_version >= '3.10'" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "boltons", specifier = ">=20.0.0" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "coverage", extras = ["toml"], specifier = ">=7" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "tox", specifier = ">=4" },
-    { name = "tox-uv", specifier = ">=1" },
 ]
 
 [[package]]
@@ -364,7 +354,7 @@ dev = [
 requires-dist = [
     { name = "attrs" },
     { name = "boltons" },
-    { name = "face", editable = "../face" },
+    { name = "face", git = "https://github.com/mahmoud/face.git?branch=master" },
     { name = "pynacl" },
     { name = "ruamel-yaml" },
     { name = "schema" },

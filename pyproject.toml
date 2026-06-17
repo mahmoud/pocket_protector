@@ -54,7 +54,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-face = { path = "../face", editable = true }
+face = { git = "https://github.com/mahmoud/face.git", branch = "master" }
 
 [tool.uv]
 environments = ["python_version >= '3.10'"]
