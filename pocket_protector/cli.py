@@ -13,7 +13,7 @@ import json
 import shlex
 import difflib
 
-from face import Command, Flag, face_middleware, CommandLineError, UsageError, echo, prompt
+from face import Command, CommandGroup, Flag, face_middleware, CommandLineError, UsageError, echo, prompt
 
 from . import __version__
 from .file_keys import KeyFile, Creds, PPError
@@ -181,37 +181,44 @@ def _get_cmd(prepare=False):
     cmd.add(mw_ensure_kf)
     cmd.add(mw_exit_handler)
 
-    # add subcommands
+    # bare (ungrouped) subcommands
     cmd.add(add_key_custodian, name='init', doc='create a new protected')
-    cmd.add(add_key_custodian)
-    cmd.add(rekey_custodian)
-
-    cmd.add(add_domain)
-    cmd.add(rm_domain)
-
-    cmd.add(add_owner)
-    cmd.add(rm_owner)
-
-    cmd.add(add_secret)
-    cmd.add(update_secret)
-    cmd.add(rm_secret)
-
-    cmd.add(set_key_custodian_passphrase)
-    cmd.add(rotate_domain_keys)
-
-    cmd.add(migrate_owner)
-    cmd.add(list_user_secrets)
-
-    cmd.add(decrypt_domain, posargs={'count': 1, 'provides': 'domain_name'})
-
-    cmd.add(exec_command, name='exec', post_posargs=True)
-
-    cmd.add(list_domains)
-    cmd.add(list_domain_secrets, posargs={'count': 1, 'provides': 'domain_name'})
-    cmd.add(list_all_secrets)
+    cmd.add(print_version, name='version')
     cmd.add(list_audit_log)
 
-    cmd.add(print_version, name='version')
+    # Access Management (create, list, update, misc, delete)
+    access = CommandGroup('Access Management')
+    access.add(add_key_custodian)
+    access.add(list_user_secrets)
+    access.add(set_key_custodian_passphrase)
+    access.add(rekey_custodian)
+    cmd.add(access)
+
+    # Domain Management (create, list, read, update, misc, delete)
+    domains = CommandGroup('Domain Management')
+    domains.add(add_domain)
+    domains.add(add_owner)
+    domains.add(list_domains)
+    domains.add(rotate_domain_keys)
+    domains.add(migrate_owner)
+    domains.add(rm_owner)
+    domains.add(rm_domain)
+    cmd.add(domains)
+
+    # Secret Management (create, list, update, delete)
+    secrets = CommandGroup('Secret Management')
+    secrets.add(add_secret)
+    secrets.add(list_domain_secrets, posargs={'count': 1, 'provides': 'domain_name'})
+    secrets.add(list_all_secrets)
+    secrets.add(update_secret)
+    secrets.add(rm_secret)
+    cmd.add(secrets)
+
+    # Secret Access (read, misc)
+    secret_access = CommandGroup('Secret Access')
+    secret_access.add(decrypt_domain, posargs={'count': 1, 'provides': 'domain_name'})
+    secret_access.add(exec_command, name='exec', post_posargs=True)
+    cmd.add(secret_access)
 
     if prepare:
         cmd.prepare()  # an optional check on all subcommands, not just the one being executed

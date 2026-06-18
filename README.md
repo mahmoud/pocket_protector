@@ -160,39 +160,45 @@ for more usage tips.
 Here is a summary of all commands:
 
 ```
-usage: pprotect [COMMANDS]
+usage: pprotect subcommand [FLAGS]
 
-Commands:
-  add-domain            add a new domain to the protected
-  add-key-custodian     add a new key custodian to the protected
-  add-owner             add a key custodian as owner of a domain
-  add-secret            add a secret to a specified domain
-  decrypt-domain        decrypt and display JSON-formatted cleartext for a
-                        domain
-  exec                  run a command with decrypted secrets injected as
-                        environment variables
-  init                  create a new pocket-protected file
-  list-all-secrets      display all secrets, with a list of domains the key is
-                        present in
-  list-audit-log        display a chronological list of audit log entries
-                        representing file activity
-  list-domain-secrets   display a list of secrets under a specific domain
-  list-domains          display a list of available domains
-  list-user-secrets     similar to list-all-secrets, but filtered by a given
-                        user
-  migrate-owner         migrate all domain ownerships from one custodian to
-                        another
-  rekey-custodian       re-encrypt a custodian's key with a new passphrase
-                        and/or KDF
-  rm-domain             remove a domain from the protected
-  rm-owner              remove an owner's privileges on a specified domain
-  rm-secret             remove a secret from a specified domain
-  rotate-domain-keys    rotate the internal keys for a particular domain (must
-                        be owner)
-  set-key-custodian-passphrase
-                        change a key custodian passphrase
-  update-secret         update an existing secret in a specified domain
-  version               display the current version
+Subcommands:
+
+  init                  create a new protected
+  version               print the PocketProtector version and exit
+  list-audit-log        print a list of actions from the audit log, one per line
+
+  Access Management:
+    add-key-custodian   add a new key custodian to the protected
+    list-user-secrets   display domains and secrets accessible to the
+                        authenticated user
+    set-key-custodian-passphrase
+                        update a key custodian passphrase
+    rekey-custodian     change a custodian key type (hard/fast/raw) and
+                        passphrase, re-encrypting all owned domains
+
+  Domain Management:
+    add-domain          add a new domain to the protected
+    add-owner           add a key custodian to the owner list of a specific domain
+    list-domains        print a list of domain names, if any
+    rotate-domain-keys  rotate the internal encryption keys for a given domain
+    migrate-owner       grant a custodian ownership of all domains you own
+    rm-owner            remove a key custodian from the owner list of a domain
+    rm-domain           remove a domain and all of its keys from the protected
+
+  Secret Management:
+    add-secret          add a secret to a domain
+    list-domain-secrets print a list of secret names for a given domain
+    list-all-secrets    print a list of all secret names, along with the
+                        domains that define each
+    update-secret       update a secret value in a domain
+    rm-secret           remove a secret from a domain
+
+  Secret Access:
+    decrypt-domain      decrypt and display cleartext for a domain, with
+                        optional format and secret filter
+    exec                run a command with decrypted domain secrets injected
+                        as environment variables
 ```
 
 

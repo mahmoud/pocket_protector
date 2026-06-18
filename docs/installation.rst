@@ -4,7 +4,7 @@ Installation
 Requirements
 ------------
 
-PocketProtector requires **Python 3.9 or newer**.
+PocketProtector requires **Python 3.10 or newer**.
 
 Dependencies are installed automatically:
 
