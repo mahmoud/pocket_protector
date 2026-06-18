@@ -9,8 +9,9 @@ scheme (`YY.MINOR.MICRO`).
 Check this page when upgrading, we strive to keep the updates
 summarized and readable.
 
-26.1.1dev (unreleased)
-----------------------
+26.3.0
+------
+*(June 18, 2026)*
 
 * Add Creds.from_env() classmethod for reading credentials from environment
 * Organize CLI subcommands into groups (Access Management, Domain Management,
