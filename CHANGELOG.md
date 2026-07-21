@@ -9,6 +9,15 @@ scheme (`YY.MINOR.MICRO`).
 Check this page when upgrading, we strive to keep the updates
 summarized and readable.
 
+26.4.0
+------
+*(July 21, 2026)*
+
+* Add --domain, --secret-name, and --from-file flags to add-secret and
+  update-secret, so secret values (multi-line PEMs, values >1024 bytes)
+  can be loaded from a file or stdin instead of an interactive prompt
+* CI: pin GitHub Actions to commit SHAs and restrict workflow token permissions
+
 26.3.0
 ------
 *(June 18, 2026)*
