@@ -1084,3 +1084,55 @@ def test_env_prefix_env_var_scrubbed_from_exec():
     assert 'PPROTECT_PASSPHRASE' not in result
     assert 'PPROTECT_USER' not in result
     assert result['DB_PASS'] == 'ok'
+
+
+
+def test_secret_from_file(tmp_path, _fast_crypto):
+    """Test --domain/--secret-name/--from-file flags on add-secret and update-secret."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+
+    # Init with fast crypto
+    cc.run(f'pprotect init --file {protected_path} --key-type fast',
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc2.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+
+    # Case 1: Multi-line + >1024-byte value from file (both original failure modes)
+    pem_val = '-----BEGIN X-----\n' + 'A' * 1800 + '\n-----END X-----\n'
+    pem_file = tmp_path / 'k.pem'
+    pem_file.write_text(pem_val)
+    cc2.run(['pprotect', 'add-secret',
+             '--domain', DOMAIN_NAME,
+             '--secret-name', 'pem_key',
+             '--from-file', _fwd(pem_file)])
+    res = cc2.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)['pem_key'] == pem_val
+
+    # Case 2: stdin via --from-file -
+    stdin_val = 'new\nmultiline\nvalue\n'
+    cc2.run(['pprotect', 'update-secret',
+             '--domain', DOMAIN_NAME,
+             '--secret-name', 'pem_key',
+             '--from-file', '-'],
+            input=stdin_val)
+    res = cc2.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)['pem_key'] == stdin_val
+
+    # Case 3: Partial flags still prompt for missing values
+    cc2.run(['pprotect', 'add-secret',
+             '--domain', DOMAIN_NAME],
+            input=['prompted_name', 'prompted_val'])
+    res = cc2.run(['pprotect', 'decrypt-domain', DOMAIN_NAME])
+    assert json.loads(res.stdout)['prompted_name'] == 'prompted_val'
+
+    # Case 4: Missing file gives clear error
+    res = cc2.fail_1(['pprotect', 'add-secret',
+                       '--domain', DOMAIN_NAME,
+                       '--secret-name', 'x',
+                       '--from-file', _fwd(tmp_path / 'nope.txt')])
+    assert 'unable to read secret value' in res.stderr

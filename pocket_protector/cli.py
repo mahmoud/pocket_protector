@@ -164,7 +164,12 @@ def _get_cmd(prepare=False):
     cmd.add('--secret',
             doc='decrypt a single secret by name (decrypt-domain only)')
     cmd.add('--domain',
-            doc='domain name (used by exec subcommand)')
+            doc='domain name (used by exec, add-secret, and update-secret)')
+    cmd.add('--secret-name',
+            doc='secret name (add-secret and update-secret)')
+    cmd.add('--from-file',
+            doc="read the secret value from this file path, verbatim;"
+                " pass - to read from stdin (add-secret and update-secret)")
     cmd.add('--prefix',
             doc='prefix to prepend to secret env var names (exec only)')
     cmd.add('--uppercase', parse_as=True,
@@ -313,21 +318,38 @@ def rm_owner(wkf):
     return wkf.rm_owner(domain_name, owner_name)
 
 
-def add_secret(wkf):
+def _read_secret_value(from_file):
+    """Read a secret value verbatim from a file path, or stdin if '-'."""
+    if from_file == '-':
+        return sys.stdin.read()
+    try:
+        with open(from_file) as f:
+            return f.read()
+    except OSError as e:
+        raise UsageError('unable to read secret value from %r: %s' % (from_file, e))
+
+
+def add_secret(wkf, domain, secret_name, from_file):
     'add a secret to a domain'
     echo('Adding secret value.')
-    domain_name = prompt('Domain name: ')
-    secret_name = prompt('Secret name: ')
-    secret_value = prompt('Secret value: ')
+    domain_name = domain or prompt('Domain name: ')
+    secret_name = secret_name or prompt('Secret name: ')
+    if from_file is not None:
+        secret_value = _read_secret_value(from_file)
+    else:
+        secret_value = prompt('Secret value: ')
     return wkf.add_secret(domain_name, secret_name, secret_value)
 
 
-def update_secret(wkf):
+def update_secret(wkf, domain, secret_name, from_file):
     'update a secret value in a domain'
     echo('Updating secret value.')
-    domain_name = prompt('Domain name: ')
-    secret_name = prompt('Secret name: ')
-    secret_value = prompt('Secret value: ')
+    domain_name = domain or prompt('Domain name: ')
+    secret_name = secret_name or prompt('Secret name: ')
+    if from_file is not None:
+        secret_value = _read_secret_value(from_file)
+    else:
+        secret_value = prompt('Secret value: ')
     return wkf.update_secret(domain_name, secret_name, secret_value)
 
 
