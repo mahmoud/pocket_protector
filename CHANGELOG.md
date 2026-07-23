@@ -9,6 +9,15 @@ scheme (`YY.MINOR.MICRO`).
 Check this page when upgrading, we strive to keep the updates
 summarized and readable.
 
+26.4.1
+------
+*(July 23, 2026)*
+
+* Promote --ignore-env to a visible, documented flag (was hidden with display=False)
+* Fix --ignore-env to actually skip credential env var reads (previously only gated the error check)
+* Allow --non-interactive --ignore-env when --passphrase-file supplies credentials
+* Improve error message for --non-interactive + --ignore-env to reference CLI flags
+
 26.4.0
 ------
 *(July 21, 2026)*
