@@ -72,9 +72,9 @@ def _get_creds(kf,
                passphrase_file=None,
                user_env_var='PPROTECT_USER',
                pass_env_var='PPROTECT_PASSPHRASE'):
-    if not interactive and not check_env:
-        raise UsageError('expected at least one of check_env'
-                         ' and interactive to be True', 2)
+    if not interactive and not check_env and not passphrase_file:
+        raise UsageError('--non-interactive with --ignore-env requires'
+                         ' --passphrase-file (and --user) to supply credentials', 2)
     user_source = 'argument'
     passphrase, passphrase_source = None, None
     if passphrase_file:
@@ -89,12 +89,13 @@ def _get_creds(kf,
             raise UsageError(msg=msg)
         else:
             passphrase_source = "passphrase file: %s" % passphrase_file
-    if user is None and user_env_var:
-        user = os.getenv(user_env_var)
-        user_source = 'env var: %s' % user_env_var
-    if passphrase is None and pass_env_var:
-        passphrase = os.getenv(pass_env_var)
-        passphrase_source = 'env var: %s' % pass_env_var
+    if check_env:
+        if user is None and user_env_var:
+            user = os.getenv(user_env_var)
+            user_source = 'env var: %s' % user_env_var
+        if passphrase is None and pass_env_var:
+            passphrase = os.getenv(pass_env_var)
+            passphrase_source = 'env var: %s' % pass_env_var
 
     if interactive:
         msg = ''
@@ -151,8 +152,9 @@ def _get_cmd(prepare=False):
             doc='show diff and prompt for confirmation before modifying the file')
     cmd.add('--non-interactive', parse_as=True,
             doc='disable falling back to interactive authentication, useful for automation')
-    cmd.add('--ignore-env', parse_as=True, display=False,  # TODO: keep?
-            doc='ignore credential environment variables (e.g., PPROTECT_PASSPHRASE)')
+    cmd.add('--ignore-env', parse_as=True,
+            doc='ignore credential environment variables (e.g., PPROTECT_USER,'
+                ' PPROTECT_PASSPHRASE), forcing credentials from flags or interactive prompt')
     cmd.add('--user', char='-u',
             doc="the acting user's email credential")
     cmd.add('--passphrase-file',

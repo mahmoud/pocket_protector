@@ -524,6 +524,12 @@ Flags take precedence over environment variables, and both bypass
 interactive prompts. If an incorrect credential is passed,
 PocketProtector does *not* fall back to other sources.
 
+Pass ``--ignore-env`` to skip step 2 entirely — useful when stale
+credentials are exported in your shell and you want to authenticate as
+someone else. Combining ``--ignore-env`` with ``--non-interactive``
+requires ``--passphrase-file`` (and ``--user``), since no other
+credential source remains.
+
 ### File-based passphrases
 
 For mount-based secret management (Docker secrets, Kubernetes mounted

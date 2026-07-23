@@ -135,9 +135,10 @@ def test_cli(tmp_path, _fast_crypto):
     res_data = json.loads(res.stdout)
     assert res_data[SECRET_NAME] == SECRET_VALUE
 
-    # test mutual exclusivity of check env and interactive
-    cc.fail_2(['pprotect', 'decrypt-domain',
-               '--non-interactive', '--ignore-env', DOMAIN_NAME])
+    # --non-interactive + --ignore-env with no passphrase source is a usage error
+    res = cc.fail_2(['pprotect', 'decrypt-domain',
+                     '--non-interactive', '--ignore-env', DOMAIN_NAME])
+    assert '--passphrase-file' in res.stderr
 
     res = cc.fail_1('pprotect decrypt-domain --non-interactive ' + DOMAIN_NAME,
                     env={'PPROTECT_PASSPHRASE': None})
@@ -974,6 +975,46 @@ def test_cli_env_prefix_flag(tmp_path, _fast_crypto):
     cc2.fail_1(['pprotect', 'decrypt-domain', '--env-prefix', 'MYAPP',
                 '--non-interactive', DOMAIN_NAME])
 
+
+def test_ignore_env(tmp_path, _fast_crypto):
+    """--ignore-env skips credential env vars; explicit flags still work."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+
+    # Set up a domain + secret using valid env creds
+    valid_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc_valid = CommandChecker(cmd, chdir=str(tmp_path), env=valid_env, reraise=True)
+    cc_valid.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc_valid.run(['pprotect', 'add-secret'],
+                 input=[DOMAIN_NAME, SECRET_NAME, SECRET_VALUE])
+
+    # Case 1: env ignored, interactive prompt wins
+    bad_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': 'wrong_phrase'}
+    cc_bad = CommandChecker(cmd, chdir=str(tmp_path), env=bad_env, reraise=True)
+    res = cc_bad.run(['pprotect', 'decrypt-domain', '--ignore-env', DOMAIN_NAME],
+                     input=[KURT_EMAIL, KURT_PHRASE])
+    # prompt text precedes JSON on stdout; extract from first '{'
+    stdout = res.stdout[res.stdout.index('{'):]
+    assert json.loads(stdout)[SECRET_NAME] == SECRET_VALUE
+
+    # Case 2 (control): same env WITHOUT --ignore-env uses wrong passphrase -> fail
+    cc_bad_ni = CommandChecker(cmd, chdir=str(tmp_path), env=bad_env, reraise=True)
+    cc_bad_ni.fail_1(['pprotect', 'decrypt-domain',
+                      '--non-interactive', DOMAIN_NAME])
+
+    # Case 3: explicit flags with env fully ignored (the combination Step 2 unblocks)
+    ppfile_path = _fwd(tmp_path / 'tmp_passphrase')
+    with open(ppfile_path, 'wb') as f:
+        f.write(KURT_PHRASE.encode('utf8'))
+    wrong_env = {'PPROTECT_USER': 'wrong@example.com', 'PPROTECT_PASSPHRASE': 'wrong_phrase'}
+    cc_wrong = CommandChecker(cmd, chdir=str(tmp_path), env=wrong_env, reraise=True)
+    res = cc_wrong.run(['pprotect', 'decrypt-domain', '--non-interactive',
+                        '--ignore-env', '--user', KURT_EMAIL,
+                        '--passphrase-file', ppfile_path, DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
 
 def test_exec_subprocess_custom_prefix(tmp_path, _fast_crypto):
     """Subprocess integration: exec with --env-prefix scrubs both default and custom vars."""

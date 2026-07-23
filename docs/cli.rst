@@ -25,6 +25,13 @@ These flags are available on all subcommands:
    Disable interactive prompts. The command fails if credentials cannot
    be resolved from flags or environment variables.
 
+.. option:: --ignore-env
+
+   Ignore credential environment variables (``PPROTECT_USER``,
+   ``PPROTECT_PASSPHRASE``, or custom-prefix equivalents). Credentials
+   must come from flags or the interactive prompt. When combined with
+   ``--non-interactive``, ``--passphrase-file`` is required.
+
 .. option:: --user EMAIL, -u EMAIL
 
    The acting user's email credential.

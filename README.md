@@ -96,6 +96,10 @@ options, highlighted here:
     management, like Docker)
   * `--domain DOMAIN` - specifies the name of the domain
   * `--non-interactive` - causes the command to fail when credentials cannot be gotten by other means
+  * `--ignore-env` - ignores credential environment variables
+    (`PPROTECT_USER`, `PPROTECT_PASSPHRASE`, and custom-prefix
+    equivalents), forcing credentials to come from flags or an
+    interactive prompt
   * `--env-prefix PREFIX` - sets the env var prefix for credential
     lookup (default: `PPROTECT`). When set, credentials are read from
     `PREFIX_USER` and `PREFIX_PASSPHRASE` instead of the defaults

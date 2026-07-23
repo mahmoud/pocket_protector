@@ -356,6 +356,9 @@ PocketProtector resolves credentials in this order:
 Flags take precedence over environment variables, and both bypass
 interactive prompts.
 
+To skip environment variables entirely (e.g., stale exported
+credentials), pass ``--ignore-env``.
+
 Non-interactive mode
 ~~~~~~~~~~~~~~~~~~~~
 
