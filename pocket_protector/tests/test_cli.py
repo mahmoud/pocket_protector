@@ -1247,9 +1247,11 @@ def test_env_file_auto_discover(tmp_path, _fast_crypto):
     _setup_protected(tmp_path, cc)
     # Write .env next to protected.yaml
     (tmp_path / '.env').write_text(
-        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE))
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE),
+        encoding='utf8')
     # No env vars, non-interactive — .env should supply creds
-    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
     res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
     assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
 
@@ -1264,8 +1266,10 @@ def test_env_file_explicit_path(tmp_path, _fast_crypto):
     other_dir.mkdir()
     env_path = other_dir / 'my.env'
     env_path.write_text(
-        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE))
-    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE),
+        encoding='utf8')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
     res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive',
                    '--env-file', _fwd(env_path), DOMAIN_NAME])
     assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
@@ -1291,8 +1295,10 @@ def test_no_env_file_flag(tmp_path, _fast_crypto):
     cc = CommandChecker(cmd, reraise=True)
     _setup_protected(tmp_path, cc)
     (tmp_path / '.env').write_text(
-        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE))
-    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE),
+        encoding='utf8')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
     # With --no-env-file, the .env is ignored; non-interactive + no env = fail
     res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive',
                     '--no-env-file', DOMAIN_NAME])
@@ -1305,7 +1311,44 @@ def test_env_file_missing_explicit_errors(tmp_path, _fast_crypto):
     cmd = cli._get_cmd()
     cc = CommandChecker(cmd, reraise=True)
     _setup_protected(tmp_path, cc)
-    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env={}, reraise=True)
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
     res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive',
                     '--env-file', _fwd(tmp_path / 'nonexistent.env'), DOMAIN_NAME])
     assert 'env file not found' in res.stderr
+
+
+def test_env_file_invalid_ignored_when_creds_complete(tmp_path, _fast_crypto):
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    (tmp_path / '.env').write_bytes(b'\xff\xfe\x00bad')
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert json.loads(res.stdout) == {SECRET_NAME: SECRET_VALUE}
+
+
+def test_env_file_invalid_clean_error_when_consulted(tmp_path, _fast_crypto):
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    (tmp_path / '.env').write_bytes(b'\xff\xfe\x00bad')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
+    res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert 'failed to read env file' in res.stderr
+    assert 'Traceback' not in res.stderr
+
+
+def test_env_file_and_no_env_file_conflict(tmp_path, _fast_crypto):
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    env_path = tmp_path / '.env'
+    env_path.write_text('', encoding='utf8')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
+    res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive',
+                   '--env-file', _fwd(env_path), '--no-env-file', DOMAIN_NAME])
+    assert 'mutually exclusive' in res.stderr

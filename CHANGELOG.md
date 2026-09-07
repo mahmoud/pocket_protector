@@ -21,6 +21,11 @@ summarized and readable.
   instead of accepting trailing bytes or leaking low-level errors (HO-001).
 * Clarify that raw-key format validation does not establish entropy; use the
   built-in randomness-backed generator rather than hand-crafted hex (HO-002).
+* Add automatic and explicit .env credential fallback without changing os.environ.
+* Read env files only when higher-priority credential sources leave a field
+  unresolved; report unreadable or invalid UTF-8 files as usage errors (PP-001).
+* Reject --env-file combined with --no-env-file; --ignore-env skips both
+  process credentials and env files (HO-006).
 
 26.4.1
 ------

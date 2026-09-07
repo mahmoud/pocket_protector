@@ -112,28 +112,28 @@ class EnvVars:
     @classmethod
     def from_file(cls, path):
         """Read and parse a .env file."""
-        with open(path) as f:
-            return cls.from_text(f.read(), source=path)
+        try:
+            with open(path, 'rb') as f:
+                text = f.read().decode('utf8')
+        except (IOError, OSError, UnicodeDecodeError) as e:
+            raise UsageError('failed to read env file at "%s" (%s);'
+                             ' pass --no-env-file to ignore it' % (path, e))
+        return cls.from_text(text, source=path)
 
 
-def _resolve_env_file(kf_path, env_file, no_env_file):
-    """Resolve and parse a .env file for credential lookup.
-
-    Returns an EnvVars instance, or None if no file applies.
-    Raises UsageError if --env-file points to a missing file.
-    """
+def _resolve_env_file_path(kf_path, env_file, no_env_file):
+    """Resolve a credential file path without reading its contents."""
+    if env_file and no_env_file:
+        raise UsageError('--env-file and --no-env-file are mutually exclusive', 2)
     if no_env_file:
         return None
     if env_file:
         env_file = os.path.abspath(env_file)
         if not os.path.isfile(env_file):
             raise UsageError('env file not found: %s' % env_file)
-        return EnvVars.from_file(env_file)
-    # auto-discover .env next to the protected file
+        return env_file
     candidate = os.path.join(os.path.dirname(kf_path), '.env')
-    if os.path.isfile(candidate):
-        return EnvVars.from_file(candidate)
-    return None
+    return candidate if os.path.isfile(candidate) else None
 
 
 def _get_creds(kf,
@@ -143,7 +143,7 @@ def _get_creds(kf,
                passphrase_file=None,
                user_env_var='PPROTECT_USER',
                pass_env_var='PPROTECT_PASSPHRASE',
-               env_file_vars=None):
+               env_file_path=None):
     if not interactive and not check_env and not passphrase_file:
         raise UsageError('--non-interactive with --ignore-env requires'
                          ' --passphrase-file (and --user) to supply credentials', 2)
@@ -170,12 +170,14 @@ def _get_creds(kf,
             passphrase_source = 'env var: %s' % pass_env_var
 
     # .env file fallback (below real env, above interactive prompt)
-    if user is None and env_file_vars and user_env_var in env_file_vars:
-        user = env_file_vars[user_env_var]
-        user_source = 'env file: %s' % user_env_var
-    if passphrase is None and env_file_vars and pass_env_var in env_file_vars:
-        passphrase = env_file_vars[pass_env_var]
-        passphrase_source = 'env file: %s' % pass_env_var
+    if (user is None or passphrase is None) and env_file_path:
+        env_file_vars = EnvVars.from_file(env_file_path)
+        if user is None and user_env_var and user_env_var in env_file_vars:
+            user = env_file_vars[user_env_var]
+            user_source = 'env file: %s' % user_env_var
+        if passphrase is None and pass_env_var and pass_env_var in env_file_vars:
+            passphrase = env_file_vars[pass_env_var]
+            passphrase_source = 'env file: %s' % pass_env_var
 
     if interactive:
         msg = ''
@@ -233,8 +235,8 @@ def _get_cmd(prepare=False):
     cmd.add('--non-interactive', parse_as=True,
             doc='disable falling back to interactive authentication, useful for automation')
     cmd.add('--ignore-env', parse_as=True,
-            doc='ignore credential environment variables (e.g., PPROTECT_USER,'
-                ' PPROTECT_PASSPHRASE), forcing credentials from flags or interactive prompt')
+            doc='ignore credential environment variables and .env files,'
+                ' forcing credentials from flags or interactive prompt')
     cmd.add('--user', char='-u',
             doc="the acting user's email credential")
     cmd.add('--passphrase-file',
@@ -264,7 +266,7 @@ def _get_cmd(prepare=False):
     cmd.add('--env-file',
             doc='path to a .env file for credential env vars (default: .env next to protected file)')
     cmd.add('--no-env-file', parse_as=True,
-            doc='suppress automatic .env file discovery')
+            doc='suppress automatic .env file discovery (conflicts with --env-file)')
 
     # add middlewares, outermost first ("first added, first called")
     cmd.add(mw_verify_creds)
@@ -708,7 +710,7 @@ Begin middlewares
 @face_middleware(provides=['creds'], optional=True)
 def mw_verify_creds(next_, kf, user, ignore_env, non_interactive,
                     passphrase_file, env_prefix, env_file, no_env_file):
-    env_file_vars = {} if ignore_env else _resolve_env_file(kf.path, env_file, no_env_file)
+    env_file_path = None if ignore_env else _resolve_env_file_path(kf.path, env_file, no_env_file)
     user_var, pass_var = _env_var_names(env_prefix)
     creds = _get_creds(kf, user,
                        check_env=not ignore_env,
@@ -716,7 +718,7 @@ def mw_verify_creds(next_, kf, user, ignore_env, non_interactive,
                        passphrase_file=passphrase_file,
                        user_env_var=user_var,
                        pass_env_var=pass_var,
-                       env_file_vars=env_file_vars)
+                       env_file_path=env_file_path)
     return next_(creds=creds)
 
 
