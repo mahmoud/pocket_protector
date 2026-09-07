@@ -68,6 +68,11 @@ _FILE_SCHEMA = schema.Schema(_as_d(
 KDF_SENSITIVE = (nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE, nacl.pwhash.argon2id.MEMLIMIT_MODERATE)  # ~0.8s, 256MB - production default
 KDF_INTERACTIVE = (nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE, nacl.pwhash.argon2id.MEMLIMIT_INTERACTIVE)  # ~0.1s, 64MB - dev/testing
 
+# Load-time ceiling for stored v1 KDF cost parameters. A hostile edit to
+# protected.yaml must not be able to OOM/stall a loader (PP-003).
+KDF_OPSLIMIT_MAX = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE  # 4
+KDF_MEMLIMIT_MAX = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE  # 1 GiB
+
 # Raw key passphrase format: P<64 hex chars>P
 # When passphrase has sufficient entropy, KDF can be bypassed entirely.
 _RAW_KEY_RE = re.compile(r'^P([0-9a-f]{64})P$')
@@ -222,6 +227,9 @@ class _KeyCustodian(object):
         version = raw[0]
         if version == 0:
             # v0: version(1) + salt(8) + pubkey(32)
+            if len(raw) != 41:
+                raise PPError('custodian %r pwdkm v%d: expected %d bytes, got %d'
+                              % (name, version, 41, len(raw)))
             payload = raw[1:]
             salt, public_key = payload[:8], payload[8:8 + nacl.public.PublicKey.SIZE]
             return cls(
@@ -229,7 +237,16 @@ class _KeyCustodian(object):
                 salt=salt, opslimit=None, memlimit=None)
         elif version == 1:
             # v1: version(1) + opslimit(4 LE) + memlimit(4 LE) + salt(8) + pubkey(32)
+            if len(raw) != 49:
+                raise PPError('custodian %r pwdkm v%d: expected %d bytes, got %d'
+                              % (name, version, 49, len(raw)))
             opslimit, memlimit = struct.unpack_from('<II', raw, 1)
+            if ((opslimit > KDF_OPSLIMIT_MAX or memlimit > KDF_MEMLIMIT_MAX)
+                    and not os.getenv('PPROTECT_TRUST_KDF_PARAMS')):
+                raise PPError('custodian %r stored KDF params exceed limits:'
+                              ' opslimit=%r (max %r), memlimit=%r (max %r);'
+                              ' set PPROTECT_TRUST_KDF_PARAMS=1 to load anyway'
+                              % (name, opslimit, KDF_OPSLIMIT_MAX, memlimit, KDF_MEMLIMIT_MAX))
             payload = raw[9:]
             salt, public_key = payload[:8], payload[8:8 + nacl.public.PublicKey.SIZE]
             return cls(
@@ -237,6 +254,9 @@ class _KeyCustodian(object):
                 salt=salt, opslimit=opslimit, memlimit=memlimit, raw_key=False)
         elif version == 2:
             # v2: version(1) + salt(8) + pubkey(32) - raw key, no argon2
+            if len(raw) != 41:
+                raise PPError('custodian %r pwdkm v%d: expected %d bytes, got %d'
+                              % (name, version, 41, len(raw)))
             payload = raw[1:]
             salt, public_key = payload[:8], payload[8:8 + nacl.public.PublicKey.SIZE]
             return cls(

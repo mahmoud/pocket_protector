@@ -15,6 +15,10 @@ summarized and readable.
 
 * Quote shell command substitution in the eval recipes to prevent word
   splitting and pathname expansion (PP-002); place options before the domain.
+* Reject stored v1 KDF costs above 4 operations or 1 GiB before derivation;
+  allow explicit trusted-file loading with PPROTECT_TRUST_KDF_PARAMS=1 (PP-003).
+* Reject truncated or overlong custodian key material in all wire versions
+  instead of accepting trailing bytes or leaking low-level errors (HO-001).
 
 26.4.1
 ------

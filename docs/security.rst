@@ -68,12 +68,27 @@ Cryptographic details
   * ``raw``: No KDF. A 256-bit random key is used directly. Format:
     ``P<64 hex chars>P``
 
+  Stored v1 KDF costs are checked when the file is loaded, before any key
+  derivation. The maximum ``opslimit`` is **4** and the maximum ``memlimit``
+  is **1,073,741,824 bytes (1 GiB)**, matching PyNaCl's
+  ``argon2id.OPSLIMIT_SENSITIVE`` and ``argon2id.MEMLIMIT_SENSITIVE``.
+  Exceeding either ceiling raises ``PPError``; costs are never silently
+  clamped because that would change the derived key.
+
+  For a trusted file that intentionally uses higher costs, set
+  ``PPROTECT_TRUST_KDF_PARAMS=1`` before loading it. Any nonempty value
+  disables these load-time ceilings for both CLI and library callers.
+  Leave it unset for untrusted files, and ensure sufficient memory and CPU
+  are available before deriving a key with trusted higher costs.
+
 * **Encryption**: NaCl ``SealedBox`` (Curve25519 public key encryption)
 * **Secret storage**: Each secret is encrypted with the domain's public
   key. Only domain owners (who hold the private key, encrypted under
   their passphrase) can decrypt.
 * **Versioned binary format**: Key material is prefixed with a version
-  byte (v0, v1, v2) for forward compatibility.
+  byte (v0, v1, v2) for forward compatibility. Custodian ``pwdkm`` payloads
+  must be exactly 41 bytes for v0/v2 or 49 bytes for v1 after Base64
+  decoding; both truncated payloads and trailing bytes raise ``PPError``.
 
 
 Threat model

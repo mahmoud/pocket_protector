@@ -351,6 +351,57 @@ def test_custodian_from_data_unsupported_version(_fast_crypto):
         _KeyCustodian.from_data('user@example.com', {'pwdkm': encoded})
 
 
+def test_v1_kdf_params_bounded(monkeypatch):
+    import struct
+
+    name = 'user@example.com'
+    monkeypatch.delenv('PPROTECT_TRUST_KDF_PARAMS', raising=False)
+    # Each ceiling is independent; neither an AND nor an off-by-one is safe.
+    for opslimit, memlimit in [
+            (file_keys.KDF_OPSLIMIT_MAX + 1, file_keys.KDF_INTERACTIVE[1]),
+            (file_keys.KDF_INTERACTIVE[0], file_keys.KDF_MEMLIMIT_MAX + 1),
+            (0xFFFFFFFF, 0xFFFFFFFF)]:
+        raw = b'\x01' + struct.pack('<II', opslimit, memlimit) + b'\x00' * 40
+        data = {'pwdkm': base64.b64encode(raw).decode('utf8')}
+        with pytest.raises(file_keys.PPError, match='exceed limits'):
+            file_keys._KeyCustodian.from_data(name, data)
+
+    # Trusting stored costs must preserve them, never silently clamp them.
+    monkeypatch.setenv('PPROTECT_TRUST_KDF_PARAMS', '1')
+    trusted = file_keys._KeyCustodian.from_data(name, data)
+    assert trusted.as_data() == data
+
+    monkeypatch.delenv('PPROTECT_TRUST_KDF_PARAMS')
+    raw = (b'\x01'
+           + struct.pack('<II', file_keys.KDF_OPSLIMIT_MAX, file_keys.KDF_MEMLIMIT_MAX)
+           + b'\x00' * 40)
+    boundary = {'pwdkm': base64.b64encode(raw).decode('utf8')}
+    assert file_keys._KeyCustodian.from_data(name, boundary).as_data() == boundary
+
+
+def test_pwdkm_trailing_bytes_rejected(_fast_crypto):
+    creds = file_keys.Creds('user@example.com', 'passphrase')
+    v1 = file_keys._KeyCustodian.from_creds(
+        creds, opslimit=file_keys.KDF_INTERACTIVE[0], memlimit=file_keys.KDF_INTERACTIVE[1])
+    payloads = [
+        b'\x00' + b'\x00' * 40,
+        base64.b64decode(v1.as_data()['pwdkm']),
+        b'\x02' + b'\x00' * 40,
+    ]
+    for raw in payloads:
+        data = {'pwdkm': base64.b64encode(raw + b'tail').decode('utf8')}
+        with pytest.raises(file_keys.PPError, match='expected %d bytes' % len(raw)):
+            file_keys._KeyCustodian.from_data(creds.name, data)
+
+
+@pytest.mark.parametrize('version, expected', [(0, 41), (1, 49), (2, 41)])
+def test_pwdkm_short_payloads_rejected(version, expected):
+    # A version byte alone must fail before unpacking costs or constructing keys.
+    data = {'pwdkm': base64.b64encode(bytes([version])).decode('utf8')}
+    with pytest.raises(file_keys.PPError, match='expected %d bytes, got 1' % expected):
+        file_keys._KeyCustodian.from_data('user@example.com', data)
+
+
 def test_decrypt_domain_non_owner(_fast_crypto):
     """Test that decrypt_domain raises PPError for non-owner."""
     bob = file_keys.Creds('bob@example.com', 'bob-pass')
