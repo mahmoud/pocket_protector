@@ -111,13 +111,9 @@ class EnvVars:
 
     @classmethod
     def from_file(cls, path):
-        """Read and parse a .env file."""
-        try:
-            with open(path, 'rb') as f:
-                text = f.read().decode('utf8')
-        except (IOError, OSError, UnicodeDecodeError) as e:
-            raise UsageError('failed to read env file at "%s" (%s);'
-                             ' pass --no-env-file to ignore it' % (path, e))
+        """Read and parse a .env file; raises OSError or UnicodeDecodeError."""
+        with open(path, 'rb') as f:
+            text = f.read().decode('utf8')
         return cls.from_text(text, source=path)
 
 
@@ -143,7 +139,8 @@ def _get_creds(kf,
                passphrase_file=None,
                user_env_var='PPROTECT_USER',
                pass_env_var='PPROTECT_PASSPHRASE',
-               env_file_path=None):
+               env_file_path=None,
+               env_file_discovered=False):
     if not interactive and not check_env and not passphrase_file:
         raise UsageError('--non-interactive with --ignore-env requires'
                          ' --passphrase-file (and --user) to supply credentials', 2)
@@ -171,7 +168,13 @@ def _get_creds(kf,
 
     # .env file fallback (below real env, above interactive prompt)
     if (user is None or passphrase is None) and env_file_path:
-        env_file_vars = EnvVars.from_file(env_file_path)
+        try:
+            env_file_vars = EnvVars.from_file(env_file_path)
+        except (OSError, UnicodeDecodeError) as e:
+            msg = 'failed to read env file at "%s" (%s)' % (env_file_path, e)
+            if env_file_discovered:
+                msg += '; pass --no-env-file to ignore it'
+            raise UsageError(msg)
         if user is None and user_env_var and user_env_var in env_file_vars:
             user = env_file_vars[user_env_var]
             user_source = 'env file: %s' % user_env_var
@@ -718,7 +721,8 @@ def mw_verify_creds(next_, kf, user, ignore_env, non_interactive,
                        passphrase_file=passphrase_file,
                        user_env_var=user_var,
                        pass_env_var=pass_var,
-                       env_file_path=env_file_path)
+                       env_file_path=env_file_path,
+                       env_file_discovered=not env_file)
     return next_(creds=creds)
 
 

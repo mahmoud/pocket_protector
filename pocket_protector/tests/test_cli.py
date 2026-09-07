@@ -1338,6 +1338,23 @@ def test_env_file_invalid_clean_error_when_consulted(tmp_path, _fast_crypto):
                          env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
     res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
     assert 'failed to read env file' in res.stderr
+    assert '--no-env-file' in res.stderr
+    assert 'Traceback' not in res.stderr
+
+
+def test_env_file_invalid_explicit_error_has_no_no_env_file_hint(tmp_path, _fast_crypto):
+    """An unreadable --env-file must not suggest --no-env-file, which conflicts with it."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    env_path = tmp_path / 'bad.env'
+    env_path.write_bytes(b'\xff\xfe\x00bad')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env={'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None})
+    res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive',
+                    '--env-file', _fwd(env_path), DOMAIN_NAME])
+    assert 'failed to read env file' in res.stderr
+    assert '--no-env-file' not in res.stderr
     assert 'Traceback' not in res.stderr
 
 
