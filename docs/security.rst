@@ -127,8 +127,9 @@ Passphrase security by domain
 Passphrase security will depend on the domain:
 
 * A **development** domain may set the passphrase as an environment
-  variable or hardcode it in a configuration file. The risk is low --
-  dev secrets are typically non-sensitive.
+  variable or hardcode it in a configuration file such as a ``.env``
+  next to ``protected.yaml``. The risk is low -- dev secrets are
+  typically non-sensitive.
 * A **production** domain would likely require manual entry of an
   authorized release engineer, or use AWS/GCP/Heroku key management
   solutions to inject the passphrase.
@@ -168,6 +169,22 @@ Credential injection: safest to weakest
 3. **PPROTECT_PASSPHRASE env var** (simplest): The classic option but
    not the safest. Readable by any subprocess, including AI agents,
    build scripts, and debug tooling.
+
+4. **.env file** (weakest): ``PPROTECT_USER`` and ``PPROTECT_PASSPHRASE``
+   are read from a ``.env`` in the same directory as ``protected.yaml``
+   (or the path given to ``--env-file``) whenever flags and the process
+   environment leave a credential unresolved. This puts the passphrase in
+   plaintext beside the file it unlocks, so read access to the directory
+   is enough to decrypt every domain that custodian owns. The threat model
+   above assumes the attacker can read ``protected.yaml``; a ``.env``
+   beside it voids that assumption. Coding agents and build tooling read
+   ``.env`` files as a matter of course.
+
+   Use it for development domains only. Keep it out of version control
+   (``git check-ignore -q .env`` should succeed), restrict it to ``0600``,
+   and pass ``--no-env-file`` or ``--ignore-env`` when a stray ``.env``
+   must not be consulted. The file is never loaded into the process
+   environment, so ``pprotect exec`` children do not inherit it.
 
 Security note on pprotect exec
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
