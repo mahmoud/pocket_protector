@@ -1,2 +1,2 @@
-__version__ = '26.4.2'
+__version__ = '26.4.3dev'
 from .file_keys import KeyFile, Creds, PPError, KDF_SENSITIVE, KDF_INTERACTIVE
