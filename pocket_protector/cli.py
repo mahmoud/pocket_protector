@@ -11,6 +11,7 @@ import re
 import sys
 import json
 import shlex
+import subprocess
 import difflib
 from dataclasses import dataclass
 
@@ -132,6 +133,40 @@ def _resolve_env_file_path(kf_path, env_file, no_env_file):
     return candidate if os.path.isfile(candidate) else None
 
 
+def _check_env_file_unversioned(path):
+    """Refuse credentials from an env file that git would commit.
+
+    Silently skipped outside a git working tree, when git is missing or
+    misbehaving, or when PPROTECT_TRUST_ENV_FILE is set (any nonempty value).
+    """
+    if os.getenv('PPROTECT_TRUST_ENV_FILE'):
+        return
+    apath = os.path.abspath(path)
+    git_dir, base = os.path.dirname(apath), os.path.basename(apath)
+
+    def _git(*args):
+        try:
+            return subprocess.run(['git', '-C', git_dir] + list(args),
+                                  capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    res = _git('rev-parse', '--is-inside-work-tree')
+    if res is None or res.returncode != 0 or res.stdout.strip() != b'true':
+        return  # not a repo, no git, or a broken/stub git: never block on the check itself
+    res = _git('ls-files', '--error-unmatch', '--', base)
+    if res is not None and res.returncode == 0:
+        raise UsageError('env file at "%s" is tracked by git; rotate its'
+                         ' credentials and untrack it (git rm --cached), or set'
+                         ' PPROTECT_TRUST_ENV_FILE=1 to use it anyway' % apath)
+    res = _git('check-ignore', '-q', '--no-index', '--', base)
+    if res is not None and res.returncode == 1:
+        raise UsageError('env file at "%s" is not ignored by git; add "%s" to'
+                         ' .gitignore, or set PPROTECT_TRUST_ENV_FILE=1 to use'
+                         ' it anyway' % (apath, base))
+
+
+
 def _get_creds(kf,
                user=None,
                interactive=True,
@@ -175,10 +210,14 @@ def _get_creds(kf,
             if env_file_discovered:
                 msg += '; pass --no-env-file to ignore it'
             raise UsageError(msg)
-        if user is None and user_env_var and user_env_var in env_file_vars:
+        use_user = user is None and user_env_var and user_env_var in env_file_vars
+        use_pass = passphrase is None and pass_env_var and pass_env_var in env_file_vars
+        if use_user or use_pass:
+            _check_env_file_unversioned(env_file_path)
+        if use_user:
             user = env_file_vars[user_env_var]
             user_source = 'env file: %s' % user_env_var
-        if passphrase is None and pass_env_var and pass_env_var in env_file_vars:
+        if use_pass:
             passphrase = env_file_vars[pass_env_var]
             passphrase_source = 'env file: %s' % pass_env_var
 
@@ -645,7 +684,6 @@ def exec_command(kf, creds, domain, post_posargs_,
     # Use os.execvpe to replace the current process (Unix).
     # On Windows, fall back to subprocess since execvpe behavior differs.
     if sys.platform == 'win32':
-        import subprocess
         result = subprocess.run(cmd_args, env=child_env)
         sys.exit(result.returncode)
     else:

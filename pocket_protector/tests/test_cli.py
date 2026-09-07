@@ -1,8 +1,11 @@
 import os
 import json
+import shutil
 import subprocess
 import shlex
 import sys
+
+import pytest
 
 import ruamel.yaml
 from face import CommandChecker
@@ -1369,3 +1372,66 @@ def test_env_file_and_no_env_file_conflict(tmp_path, _fast_crypto):
     res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive',
                    '--env-file', _fwd(env_path), '--no-env-file', DOMAIN_NAME])
     assert 'mutually exclusive' in res.stderr
+
+
+def _git_init(tmp_path):
+    if not shutil.which('git'):
+        pytest.skip('git unavailable')
+    subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
+
+
+_NO_CREDS_ENV = {'PPROTECT_USER': None, 'PPROTECT_PASSPHRASE': None,
+                 'PPROTECT_TRUST_ENV_FILE': None}
+
+
+def test_env_file_unignored_in_repo_errors_then_gitignore_fixes(tmp_path, _fast_crypto):
+    """An unignored .env inside a git repo is refused until .gitignore covers it."""
+    _git_init(tmp_path)
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    (tmp_path / '.env').write_text(
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE),
+        encoding='utf8')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True, env=_NO_CREDS_ENV)
+    res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert 'not ignored by git' in res.stderr
+    assert 'PPROTECT_TRUST_ENV_FILE' in res.stderr
+    assert 'Traceback' not in res.stderr
+
+    (tmp_path / '.gitignore').write_text('.env\n', encoding='utf8')
+    res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
+
+
+def test_env_file_tracked_in_repo_errors(tmp_path, _fast_crypto):
+    """A tracked .env is refused with the rotate message, even when also ignored."""
+    _git_init(tmp_path)
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    (tmp_path / '.env').write_text(
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE),
+        encoding='utf8')
+    subprocess.run(['git', '-C', str(tmp_path), 'add', '.env'], check=True)
+    (tmp_path / '.gitignore').write_text('.env\n', encoding='utf8')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True, env=_NO_CREDS_ENV)
+    res = cc2.fail(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert 'tracked by git' in res.stderr
+    assert 'not ignored' not in res.stderr
+    assert 'Traceback' not in res.stderr
+
+
+def test_env_file_trust_override(tmp_path, _fast_crypto):
+    """PPROTECT_TRUST_ENV_FILE bypasses the git check for an unignored .env."""
+    _git_init(tmp_path)
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    _setup_protected(tmp_path, cc)
+    (tmp_path / '.env').write_text(
+        'PPROTECT_USER=%s\nPPROTECT_PASSPHRASE=%s\n' % (KURT_EMAIL, KURT_PHRASE),
+        encoding='utf8')
+    cc2 = CommandChecker(cmd, chdir=str(tmp_path), reraise=True,
+                         env=dict(_NO_CREDS_ENV, PPROTECT_TRUST_ENV_FILE='1'))
+    res = cc2.run(['pprotect', 'decrypt-domain', '--non-interactive', DOMAIN_NAME])
+    assert json.loads(res.stdout)[SECRET_NAME] == SECRET_VALUE
