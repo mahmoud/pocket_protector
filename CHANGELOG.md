@@ -11,7 +11,7 @@ summarized and readable.
 
 26.4.2
 ------
-*(Unreleased)*
+*(September 7, 2026)*
 
 * Quote shell command substitution in the eval recipes to prevent word
   splitting and pathname expansion (PP-002); place options before the domain.
