@@ -19,6 +19,8 @@ summarized and readable.
   allow explicit trusted-file loading with PPROTECT_TRUST_KDF_PARAMS=1 (PP-003).
 * Reject truncated or overlong custodian key material in all wire versions
   instead of accepting trailing bytes or leaking low-level errors (HO-001).
+* Clarify that raw-key format validation does not establish entropy; use the
+  built-in randomness-backed generator rather than hand-crafted hex (HO-002).
 
 26.4.1
 ------

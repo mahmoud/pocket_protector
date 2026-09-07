@@ -66,7 +66,9 @@ Cryptographic details
   * ``fast``: ``OPSLIMIT_INTERACTIVE``, ``MEMLIMIT_INTERACTIVE`` --
     ~0.1s, 64 MB
   * ``raw``: No KDF. A 256-bit random key is used directly. Format:
-    ``P<64 hex chars>P``
+    ``P<64 hex chars>P``. Format validation checks shape, not entropy; key
+    strength depends on its randomness source, so use the built-in
+    ``os.urandom``-backed generator rather than hand-crafted hex.
 
   Stored v1 KDF costs are checked when the file is loaded, before any key
   derivation. The maximum ``opslimit`` is **4** and the maximum ``memlimit``

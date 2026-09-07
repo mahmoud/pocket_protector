@@ -458,6 +458,9 @@ PocketProtector supports three key derivation modes, selectable with
   random key displayed in the format `P<64 hex chars>P`. You must
   store this key securely (e.g., in a CI secret or vault). At creation
   time you are asked to type `YES` to confirm you have saved the key.
+  Format validation checks shape, not entropy; key strength depends on its
+  randomness source, so use the built-in `os.urandom`-backed generator
+  rather than hand-crafted hex.
 
 ### Rekeying a custodian
 
