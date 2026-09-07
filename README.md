@@ -256,11 +256,15 @@ pprotect decrypt-domain prod
 pprotect decrypt-domain prod --output-format env
 
 # Shell export format
-eval $(pprotect decrypt-domain prod --output-format shell)
+eval "$(pprotect decrypt-domain --output-format shell prod)"
 
 # Single secret, raw value (name must match exactly)
 db_pass=$(pprotect decrypt-domain prod --secret db-pass)
 ```
+
+Always quote the command substitution: unquoted output undergoes word splitting
+and pathname expansion, which can corrupt values or execute injected commands
+when a hostile filename is present in the working directory.
 
 ### What Pocket Protector is not
 

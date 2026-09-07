@@ -9,6 +9,13 @@ scheme (`YY.MINOR.MICRO`).
 Check this page when upgrading, we strive to keep the updates
 summarized and readable.
 
+26.4.2
+------
+*(Unreleased)*
+
+* Quote shell command substitution in the eval recipes to prevent word
+  splitting and pathname expansion (PP-002); place options before the domain.
+
 26.4.1
 ------
 *(July 23, 2026)*

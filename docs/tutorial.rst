@@ -235,7 +235,11 @@ The ``--output-format`` flag controls how secrets are printed:
    pprotect decrypt-domain dev --output-format env
 
    # Shell export format: export KEY="value"
-   eval $(pprotect decrypt-domain dev --output-format shell)
+   eval "$(pprotect decrypt-domain --output-format shell dev)"
+
+Always quote the command substitution: unquoted output undergoes word splitting
+and pathname expansion, which can corrupt values or execute injected commands
+when a hostile filename is present in the working directory.
 
 Single secret extraction
 ~~~~~~~~~~~~~~~~~~~~~~~~
