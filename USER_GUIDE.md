@@ -525,15 +525,17 @@ PocketProtector resolves credentials in this order:
 2. **Environment variables**: `PPROTECT_USER`, `PPROTECT_PASSPHRASE`
    (or custom prefix equivalents via `--env-prefix` /
    `PPROTECT_ENV_PREFIX`)
-3. **Interactive prompt** (unless `--non-interactive` is set)
+3. **`.env` file**: auto-discovered next to the protected file, or selected
+   explicitly with `--env-file`; read only if a credential is still missing
+4. **Interactive prompt** (unless `--non-interactive` is set)
 
-Flags take precedence over environment variables, and both bypass
-interactive prompts. If an incorrect credential is passed,
+Flags take precedence over environment variables, which take precedence
+over env files; resolved credentials bypass interactive prompts. If an incorrect credential is passed,
 PocketProtector does *not* fall back to other sources.
 
-Pass ``--ignore-env`` to skip step 2 entirely — useful when stale
-credentials are exported in your shell and you want to authenticate as
-someone else. Combining ``--ignore-env`` with ``--non-interactive``
+Pass `--ignore-env` to skip steps 2 and 3 entirely, including explicit
+`--env-file` path validation. This is useful when stale credentials are
+exported in your shell. Combining `--ignore-env` with `--non-interactive`
 requires ``--passphrase-file`` (and ``--user``), since no other
 credential source remains.
 
@@ -550,7 +552,7 @@ pprotect decrypt-domain prod --passphrase-file /run/secrets/pp_pass
 
 For CI/CD pipelines where no human is present, pass `--non-interactive`
 to cause the command to fail immediately if credentials cannot be
-resolved from flags or environment variables:
+resolved from flags, environment variables, or an env file:
 
 ```sh
 pprotect exec --domain prod --non-interactive -- ./deploy.sh

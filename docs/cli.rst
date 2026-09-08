@@ -23,12 +23,12 @@ These flags are available on all subcommands:
 .. option:: --non-interactive
 
    Disable interactive prompts. The command fails if credentials cannot
-   be resolved from flags or environment variables.
+   be resolved from flags, environment variables, or an env file.
 
 .. option:: --ignore-env
 
    Ignore credential environment variables (``PPROTECT_USER``,
-   ``PPROTECT_PASSPHRASE``, or custom-prefix equivalents). Credentials
+   ``PPROTECT_PASSPHRASE``, or custom-prefix equivalents) and env files. Credentials
    must come from flags or the interactive prompt. When combined with
    ``--non-interactive``, ``--passphrase-file`` is required.
 
@@ -51,6 +51,19 @@ These flags are available on all subcommands:
    Environment variable prefix for credential lookup. Default:
    ``PPROTECT``. When set, credentials are read from
    ``PREFIX_USER`` and ``PREFIX_PASSPHRASE``.
+
+.. option:: --env-file PATH
+
+   Use this env file instead of the ``.env`` automatically discovered next to
+   the protected file. Errors if the explicit path is missing. File contents
+   are only read when a credential is still unresolved after command-line
+   flags, ``--passphrase-file``, and process environment variables.
+   Ignored entirely under ``--ignore-env``, including path validation.
+
+.. option:: --no-env-file
+
+   Suppress automatic ``.env`` file discovery. Conflicts with ``--env-file``.
+   Both env-file options are ignored under ``--ignore-env``.
 
 .. option:: --output-format FORMAT
 

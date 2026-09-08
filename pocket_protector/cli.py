@@ -11,7 +11,9 @@ import re
 import sys
 import json
 import shlex
+import subprocess
 import difflib
+from dataclasses import dataclass
 
 from face import Command, CommandGroup, Flag, face_middleware, CommandLineError, UsageError, echo, prompt
 
@@ -65,13 +67,115 @@ def _get_new_creds(confirm=True):
     return ret
 
 
+
+@dataclass
+class EnvVars:
+    """Parsed environment variables from a .env file, text, or direct construction.
+
+    Supports dict-style ``in`` and ``[]`` lookups on the underlying vars.
+    """
+    vars: dict
+    source: str = ''
+
+    def __contains__(self, key):
+        return key in self.vars
+
+    def __getitem__(self, key):
+        return self.vars[key]
+
+    def __bool__(self):
+        return bool(self.vars)
+
+    @classmethod
+    def from_text(cls, text, source=''):
+        """Parse .env-formatted text into an EnvVars instance.
+
+        Supports KEY=VALUE, ``export`` prefix, ``#`` comments, blank lines,
+        single/double quoted values, and ``=`` in values.
+        """
+        result = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('export '):
+                line = line[7:].lstrip()
+            if '=' not in line:
+                continue
+            key, _, value = line.partition('=')
+            key = key.strip()
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+                value = value[1:-1]
+            result[key] = value
+        return cls(vars=result, source=source)
+
+    @classmethod
+    def from_file(cls, path):
+        """Read and parse a .env file; raises OSError or UnicodeDecodeError."""
+        with open(path, 'rb') as f:
+            text = f.read().decode('utf8')
+        return cls.from_text(text, source=path)
+
+
+def _resolve_env_file_path(kf_path, env_file, no_env_file):
+    """Resolve a credential file path without reading its contents."""
+    if env_file and no_env_file:
+        raise UsageError('--env-file and --no-env-file are mutually exclusive', 2)
+    if no_env_file:
+        return None
+    if env_file:
+        env_file = os.path.abspath(env_file)
+        if not os.path.isfile(env_file):
+            raise UsageError('env file not found: %s' % env_file)
+        return env_file
+    candidate = os.path.join(os.path.dirname(kf_path), '.env')
+    return candidate if os.path.isfile(candidate) else None
+
+
+def _check_env_file_unversioned(path):
+    """Refuse credentials from an env file that git would commit.
+
+    Silently skipped outside a git working tree, when git is missing or
+    misbehaving, or when PPROTECT_TRUST_ENV_FILE is set (any nonempty value).
+    """
+    if os.getenv('PPROTECT_TRUST_ENV_FILE'):
+        return
+    apath = os.path.abspath(path)
+    git_dir, base = os.path.dirname(apath), os.path.basename(apath)
+
+    def _git(*args):
+        try:
+            return subprocess.run(['git', '-C', git_dir] + list(args),
+                                  capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    res = _git('rev-parse', '--is-inside-work-tree')
+    if res is None or res.returncode != 0 or res.stdout.strip() != b'true':
+        return  # not a repo, no git, or a broken/stub git: never block on the check itself
+    res = _git('ls-files', '--error-unmatch', '--', base)
+    if res is not None and res.returncode == 0:
+        raise UsageError('env file at "%s" is tracked by git; rotate its'
+                         ' credentials and untrack it (git rm --cached), or set'
+                         ' PPROTECT_TRUST_ENV_FILE=1 to use it anyway' % apath)
+    res = _git('check-ignore', '-q', '--no-index', '--', base)
+    if res is not None and res.returncode == 1:
+        raise UsageError('env file at "%s" is not ignored by git; add "%s" to'
+                         ' .gitignore, or set PPROTECT_TRUST_ENV_FILE=1 to use'
+                         ' it anyway' % (apath, base))
+
+
+
 def _get_creds(kf,
                user=None,
                interactive=True,
                check_env=True,
                passphrase_file=None,
                user_env_var='PPROTECT_USER',
-               pass_env_var='PPROTECT_PASSPHRASE'):
+               pass_env_var='PPROTECT_PASSPHRASE',
+               env_file_path=None,
+               env_file_discovered=False):
     if not interactive and not check_env and not passphrase_file:
         raise UsageError('--non-interactive with --ignore-env requires'
                          ' --passphrase-file (and --user) to supply credentials', 2)
@@ -96,6 +200,26 @@ def _get_creds(kf,
         if passphrase is None and pass_env_var:
             passphrase = os.getenv(pass_env_var)
             passphrase_source = 'env var: %s' % pass_env_var
+
+    # .env file fallback (below real env, above interactive prompt)
+    if (user is None or passphrase is None) and env_file_path:
+        try:
+            env_file_vars = EnvVars.from_file(env_file_path)
+        except (OSError, UnicodeDecodeError) as e:
+            msg = 'failed to read env file at "%s" (%s)' % (env_file_path, e)
+            if env_file_discovered:
+                msg += '; pass --no-env-file to ignore it'
+            raise UsageError(msg)
+        use_user = user is None and user_env_var and user_env_var in env_file_vars
+        use_pass = passphrase is None and pass_env_var and pass_env_var in env_file_vars
+        if use_user or use_pass:
+            _check_env_file_unversioned(env_file_path)
+        if use_user:
+            user = env_file_vars[user_env_var]
+            user_source = 'env file: %s' % user_env_var
+        if use_pass:
+            passphrase = env_file_vars[pass_env_var]
+            passphrase_source = 'env file: %s' % pass_env_var
 
     if interactive:
         msg = ''
@@ -153,8 +277,8 @@ def _get_cmd(prepare=False):
     cmd.add('--non-interactive', parse_as=True,
             doc='disable falling back to interactive authentication, useful for automation')
     cmd.add('--ignore-env', parse_as=True,
-            doc='ignore credential environment variables (e.g., PPROTECT_USER,'
-                ' PPROTECT_PASSPHRASE), forcing credentials from flags or interactive prompt')
+            doc='ignore credential environment variables and .env files,'
+                ' forcing credentials from flags or interactive prompt')
     cmd.add('--user', char='-u',
             doc="the acting user's email credential")
     cmd.add('--passphrase-file',
@@ -181,6 +305,10 @@ def _get_cmd(prepare=False):
     cmd.add('--env-prefix', missing=os.getenv('PPROTECT_ENV_PREFIX', DEFAULT_ENV_PREFIX),
             doc='env var prefix for USER and PASSPHRASE credentials'
                 ' (default: PPROTECT, overridable via PPROTECT_ENV_PREFIX env var)')
+    cmd.add('--env-file',
+            doc='path to a .env file for credential env vars (default: .env next to protected file)')
+    cmd.add('--no-env-file', parse_as=True,
+            doc='suppress automatic .env file discovery (conflicts with --env-file)')
 
     # add middlewares, outermost first ("first added, first called")
     cmd.add(mw_verify_creds)
@@ -556,7 +684,6 @@ def exec_command(kf, creds, domain, post_posargs_,
     # Use os.execvpe to replace the current process (Unix).
     # On Windows, fall back to subprocess since execvpe behavior differs.
     if sys.platform == 'win32':
-        import subprocess
         result = subprocess.run(cmd_args, env=child_env)
         sys.exit(result.returncode)
     else:
@@ -622,14 +749,18 @@ Begin middlewares
 
 
 @face_middleware(provides=['creds'], optional=True)
-def mw_verify_creds(next_, kf, user, ignore_env, non_interactive, passphrase_file, env_prefix):
+def mw_verify_creds(next_, kf, user, ignore_env, non_interactive,
+                    passphrase_file, env_prefix, env_file, no_env_file):
+    env_file_path = None if ignore_env else _resolve_env_file_path(kf.path, env_file, no_env_file)
     user_var, pass_var = _env_var_names(env_prefix)
     creds = _get_creds(kf, user,
                        check_env=not ignore_env,
                        interactive=not non_interactive,
                        passphrase_file=passphrase_file,
                        user_env_var=user_var,
-                       pass_env_var=pass_var)
+                       pass_env_var=pass_var,
+                       env_file_path=env_file_path,
+                       env_file_discovered=not env_file)
     return next_(creds=creds)
 
 
