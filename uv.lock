@@ -321,7 +321,6 @@ name = "pocket-protector"
 source = { editable = "." }
 dependencies = [
     { name = "attrs" },
-    { name = "boltons" },
     { name = "face" },
     { name = "pynacl" },
     { name = "ruamel-yaml" },
@@ -339,7 +338,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "attrs" },
-    { name = "boltons" },
     { name = "face", specifier = ">=26.0.1" },
     { name = "pynacl" },
     { name = "ruamel-yaml" },

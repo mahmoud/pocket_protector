@@ -20,8 +20,8 @@ import nacl.secret
 import nacl.pwhash
 import schema
 import ruamel.yaml
-from boltons.dictutils import OMD
-from boltons.fileutils import atomic_save
+from ._vendor.dictutils import OMD
+from ._vendor.fileutils import atomic_save
 
 
 _VALID_NAME_RE = re.compile(r"^[A-Za-z][-_A-Za-z0-9]*\Z")

@@ -11,7 +11,7 @@ Dependencies are installed automatically:
 * `PyNaCl <https://pynacl.readthedocs.io/>`_ -- cryptographic operations (Curve25519, Argon2id)
 * `ruamel.yaml <https://yaml.readthedocs.io/>`_ -- YAML parsing and serialization
 * `attrs <https://www.attrs.org/>`_ -- data classes
-* `boltons <https://boltons.readthedocs.io/>`_ -- utility functions
+* vendored ``boltons`` utilities (``pocket_protector._vendor``, BSD-licensed, copied from boltons 25.0.0) -- atomic saves and ordered multidict
 * `schema <https://github.com/keleshev/schema>`_ -- data validation
 * `face <https://github.com/mahmoud/face>`_ -- CLI framework
 

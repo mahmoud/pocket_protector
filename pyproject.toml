@@ -27,7 +27,6 @@ classifiers = [
 ]
 dependencies = [
     "attrs",
-    "boltons",
     "PyNaCl",
     "ruamel.yaml",
     "schema",
@@ -61,7 +60,7 @@ testpaths = ["pocket_protector/tests"]
 [tool.coverage.run]
 branch = true
 source = ["pocket_protector"]
-omit = ["pocket_protector/tests/*"]
+omit = ["pocket_protector/tests/*", "pocket_protector/_vendor/*"]
 
 [tool.coverage.paths]
 source = [
