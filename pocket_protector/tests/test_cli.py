@@ -760,6 +760,52 @@ def test_build_exec_env_collision():
         cli._build_exec_env(secrets, uppercase=True, base_env={})
 
 
+def test_build_exec_env_reserved_names_refused():
+    import pytest
+    from face import UsageError
+    secrets = {'LD_PRELOAD': '/tmp/evil.so', 'PATH': '/bin/x'}
+    with pytest.raises(UsageError, match='reserved'):
+        cli._build_exec_env(secrets, base_env={})
+    # --uppercase transforms land on the denylist too
+    with pytest.raises(UsageError, match='reserved'):
+        cli._build_exec_env({'ld_preload': '/tmp/evil.so'}, uppercase=True, base_env={})
+
+
+def test_build_exec_env_reserved_names_prefix_escape():
+    """--prefix keeps reserved-looking secret names injectable."""
+    secrets = {'LD_PRELOAD': '/tmp/ok.so'}
+    result = cli._build_exec_env(secrets, prefix='APP', base_env={})
+    assert result['APP_LD_PRELOAD'] == '/tmp/ok.so'
+    assert 'LD_PRELOAD' not in result
+
+
+def test_exec_reserved_name_hostile_file(tmp_path, _fast_crypto):
+    """End-to-end: a hostile protected.yaml secret named LD_PRELOAD must
+    abort exec before the child ever runs."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s --key-type fast' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'LD_PRELOAD', '/tmp/evil.so'])
+
+    env = dict(os.environ)
+    env['PPROTECT_USER'] = KURT_EMAIL
+    env['PPROTECT_PASSPHRASE'] = KURT_PHRASE
+    result = subprocess.run(
+        ['pprotect', 'exec', '--non-interactive',
+         '--domain', DOMAIN_NAME,
+         '--file', protected_path,
+         '--', sys.executable, '-c', 'print("CHILD-RAN")'],
+        capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert result.returncode != 0
+    assert 'reserved' in result.stderr
+    assert 'CHILD-RAN' not in result.stdout
+
+
 def test_transform_secret_name():
     """Test _transform_secret_name with various inputs."""
     assert cli._transform_secret_name('DB_PASS') == 'DB_PASS'

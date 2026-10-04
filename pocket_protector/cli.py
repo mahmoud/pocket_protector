@@ -500,6 +500,19 @@ _PASSTHROUGH_VARS = ('PATH', 'HOME', 'TERM', 'LANG', 'USER', 'SHELL', 'LOGNAME')
 # Env vars scrubbed from the child process unconditionally
 _SCRUBBED_VARS = ('PPROTECT_PASSPHRASE', 'PPROTECT_USER', 'PPROTECT_ENV_PREFIX')
 
+# Env names a hostile protected.yaml must not be able to set via a secret
+# name (audit EXEC-ENV-001): loader/interpreter variables turn a file
+# write into code execution in the exec'd child. Checked after
+# --prefix/--uppercase transformation, so those remain escape hatches.
+_RESERVED_ENV_EXACT = frozenset([
+    'PATH', 'IFS', 'ENV', 'BASH_ENV', 'NODE_OPTIONS', 'PERL5OPT', 'PERL5LIB'])
+_RESERVED_ENV_PREFIXES = ('LD_', 'DYLD_', 'PYTHON', 'GIT_')
+
+
+def _is_reserved_env_name(name):
+    return (name in _RESERVED_ENV_EXACT
+            or name.startswith(_RESERVED_ENV_PREFIXES))
+
 
 def _transform_secret_name(name, prefix=None, uppercase=False):
     """Apply prefix and/or uppercase transformation to a secret name."""
@@ -530,6 +543,15 @@ def _build_exec_env(decrypted_dict, prefix=None, uppercase=False,
                 'secret name collision after transformation: %r and a prior secret both map to %r'
                 % (name, env_name))
         secret_env[env_name] = value
+
+
+    reserved = sorted(n for n in secret_env if _is_reserved_env_name(n))
+    if reserved:
+        raise UsageError(
+            'refusing to inject secrets as reserved env var names (%s);'
+            ' such names can turn a protected.yaml write into code'
+            ' execution. Use --prefix or --uppercase to transform secret'
+            ' names.' % ', '.join(reserved))
 
     # Build the child environment
     if no_passthrough:
