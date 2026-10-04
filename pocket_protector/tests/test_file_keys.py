@@ -2,6 +2,8 @@ import tempfile
 
 import pytest
 
+import schema
+
 from pocket_protector import file_keys
 
 
@@ -590,3 +592,33 @@ def test_env_flag_unset(monkeypatch):
     monkeypatch.delenv('PPROTECT_TEST_FLAG', raising=False)
     assert file_keys._env_flag('PPROTECT_TEST_FLAG') is False
     assert file_keys._env_flag('PPROTECT_TEST_FLAG', default=True) is True
+
+
+def test_schema_rejects_control_char_names():
+    """Hostile control-char names (TERM-ESC-001) must fail at load."""
+    valid = {
+        'audit-log': [],
+        'key-custodians': {
+            'alice@example.com': {'pwdkm': 'AAAA'}},
+        'my-domain': {
+            'meta': {
+                'owners': {'alice@example.com': 'alice@example.com'},
+                'public-key': 'AAAA'},
+            'secret-token': 'BBBB'},
+    }
+    file_keys._FILE_SCHEMA.validate(valid)  # printable corpus passes
+
+    for mutate in [
+            lambda d: d['key-custodians'].__setitem__('a\x1bb', {'pwdkm': 'AAAA'}),
+            lambda d: d.__setitem__('de\x1bv', d.pop('my-domain')),
+            lambda d: d['my-domain']['meta']['owners'].__setitem__(
+                'ow\x1bner', 'alice@example.com')]:
+        hostile = {k: (dict(v) if isinstance(v, dict) else list(v))
+                   for k, v in valid.items()}
+        hostile['my-domain'] = {
+            'meta': {'owners': dict(valid['my-domain']['meta']['owners']),
+                     'public-key': 'AAAA'},
+            'secret-token': 'BBBB'}
+        mutate(hostile)
+        with pytest.raises(schema.SchemaError):
+            file_keys._FILE_SCHEMA.validate(hostile)

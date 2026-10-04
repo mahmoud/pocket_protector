@@ -22,6 +22,19 @@ _ANSI_FORE_RED = '\x1b[31m'
 _ANSI_FORE_GREEN = '\x1b[32m'
 _ANSI_RESET_ALL = '\x1b[0m'
 
+_CONTROL_CHAR_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
+
+
+def _sanitize_for_terminal(text):
+    """Replace C0/C1 control chars with U+FFFD before terminal display.
+
+    File-sourced strings must not inject terminal escapes (TERM-ESC-001).
+    Replacement, not removal: keeps tampering visible and avoids silent
+    display collisions. face's echo(color=False) does not strip these.
+    """
+    return _CONTROL_CHAR_RE.sub('\ufffd', text)
+
+
 DEFAULT_ENV_PREFIX = 'PPROTECT'
 
 
@@ -568,7 +581,7 @@ def list_domains(kf):
     'print a list of domain names, if any'
     domain_names = kf.get_domain_names()
     if domain_names:
-        echo('\n'.join(domain_names))
+        echo('\n'.join(_sanitize_for_terminal(n) for n in domain_names))
     else:
         echo.err('(No domains in protected at %s)' % kf.path)
     return
@@ -593,14 +606,14 @@ def list_all_secrets(kf):
     else:
         for secret_name in sorted(secrets_map):
             domain_names = sorted(set(secrets_map[secret_name]))
-            echo('%s: %s' % (secret_name, ', '.join(domain_names)))
+            echo(_sanitize_for_terminal('%s: %s' % (secret_name, ', '.join(domain_names))))
     return
 
 
 def list_audit_log(kf):
     'print a list of actions from the audit log, one per line'
     log_list = kf.get_audit_log()
-    echo('\n'.join(log_list))
+    echo('\n'.join(_sanitize_for_terminal(e) for e in log_list))
     return
 
 
@@ -612,7 +625,7 @@ def list_user_secrets(kf, creds):
         return
     for domain_name in sorted(owned):
         secrets = kf.get_domain_secret_names(domain_name)
-        echo('%s: %s' % (domain_name, ', '.join(secrets) if secrets else '(no secrets)'))
+        echo(_sanitize_for_terminal('%s: %s' % (domain_name, ', '.join(secrets) if secrets else '(no secrets)')))
     return
 
 
@@ -673,6 +686,7 @@ def mw_write_kf(next_, kf, confirm):
         diff_lines = list(difflib.unified_diff(kf.get_contents().splitlines(),
                                                modified_kf.get_contents().splitlines(),
                                                kf.path + '.old', kf.path + '.new'))
+        diff_lines = [_sanitize_for_terminal(l) for l in diff_lines]
         diff_lines = _get_colorized_lines(diff_lines)
         echo('Changes to be written:\n')
         echo('\n'.join(diff_lines) + '\n')
@@ -693,7 +707,7 @@ def mw_exit_handler(next_):
         try:
             status = next_() or 0
         except PPError as ppe:
-            raise UsageError(ppe.args[0])
+            raise UsageError(_sanitize_for_terminal(ppe.args[0]))
     except KeyboardInterrupt:
         echo('')
         status = 130

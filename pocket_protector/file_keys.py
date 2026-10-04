@@ -44,19 +44,21 @@ def _as_d(sub_schema): return _coerce(dict, sub_schema)
 def _as_l(sub_schema): return _coerce(list, sub_schema)
 
 
+_PRINTABLE_NAME_RE = r"^[^\x00-\x1f\x7f-\x9f]+\Z"
+
 _FILE_SCHEMA = schema.Schema(_as_d(
 {
     "audit-log": _as_l([str]),
     "key-custodians": _as_d({
-        schema.Optional(str): _as_d({
+        schema.Optional(schema.Regex(_PRINTABLE_NAME_RE)): _as_d({
             "pwdkm": str,
         }),
     }),
-    schema.Optional(schema.Regex("^(?!meta).*$")): _as_d({
+    schema.Optional(schema.Regex(r"^(?!meta)[^\x00-\x1f\x7f-\x9f]+\Z")): _as_d({
         # allow string names for security domains,
         # but meta is reserved
         "meta": _as_d({
-            "owners": _as_d({str: str}),
+            "owners": _as_d({schema.Optional(schema.Regex(_PRINTABLE_NAME_RE)): str}),
             "public-key": str,
         }),
         schema.Optional(schema.Regex("^secret-[A-Za-z][-_A-Za-z0-9]*$")): str,

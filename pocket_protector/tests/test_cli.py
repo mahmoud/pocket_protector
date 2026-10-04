@@ -1191,3 +1191,28 @@ def test_flagfile_disabled(tmp_path):
     assert 'unknown flag' in res.stderr.lower()
     assert 'SENTINEL-PASSPHRASE-TOKEN' not in res.stderr
     assert 'SENTINEL-PASSPHRASE-TOKEN' not in res.stdout
+
+
+def test_sanitize_for_terminal():
+    # C0/C1 control chars (incl. ESC, CR, BEL, DEL, OSC) become U+FFFD;
+    # printable text, including the ESC-adjacent bracket text, survives.
+    assert cli._sanitize_for_terminal('a\x1b[2Kb\r\nc\x07d\x7f') == \
+        'a\ufffd[2Kb\ufffd\ufffdc\ufffdd\ufffd'
+    assert cli._sanitize_for_terminal('plain text 123!') == 'plain text 123!'
+    assert cli._sanitize_for_terminal('caf\u00e9 \u4e2d\u6587') == 'caf\u00e9 \u4e2d\u6587'
+
+
+def test_list_audit_log_sanitizes_escapes(tmp_path, _fast_crypto):
+    # YAML double-quoted escapes decode to real control chars after the
+    # reader's raw-byte check; list-audit-log must not render them raw.
+    protected_path = tmp_path / 'protected.yaml'
+    contents = ('key-custodians: {}\n'
+                'audit-log:\n'
+                '- "line1\\x1b[2K\\x1b[1Ahidden"\n')
+    protected_path.write_text(contents, encoding='utf8')
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    res = cc.run(['pprotect', 'list-audit-log', '--file', _fwd(protected_path)])
+    assert '\x1b' not in res.stdout
+    assert '\ufffd' in res.stdout
+    assert 'line1' in res.stdout
