@@ -1262,3 +1262,20 @@ def test_list_audit_log_sanitizes_escapes(tmp_path, _fast_crypto):
     assert '\x1b' not in res.stdout
     assert '\ufffd' in res.stdout
     assert 'line1' in res.stdout
+
+
+def test_rm_owner_warns_about_rotation(tmp_path, _fast_crypto):
+    """rm-owner success prints the key-rotation caveat on stderr."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    # two custodians; kurt owns the domain and adds MH as second owner
+    cc.run('pprotect add-key-custodian', input=[MH_EMAIL, MH_PHRASE, MH_PHRASE])
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run('pprotect add-owner', input=[DOMAIN_NAME, MH_EMAIL])
+    res = cc.run(['pprotect', 'rm-owner'], input=[DOMAIN_NAME, MH_EMAIL])
+    assert 'rotate-domain-keys' in res.stderr

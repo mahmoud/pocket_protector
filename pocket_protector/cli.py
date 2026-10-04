@@ -332,7 +332,11 @@ def rm_owner(wkf):
     echo('Removing domain owner.')
     domain_name = prompt('Domain name: ')
     owner_name = prompt('Owner email: ')
-    return wkf.rm_owner(domain_name, owner_name)
+    ret = wkf.rm_owner(domain_name, owner_name)
+    echo.err('Note: the removed owner can still decrypt this domain (from this'
+             ' file revision and all earlier ones) until you run'
+             ' rotate-domain-keys and change the secret values.')
+    return ret
 
 
 def _read_secret_value(from_file):
