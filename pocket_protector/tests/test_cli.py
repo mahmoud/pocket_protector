@@ -1177,3 +1177,17 @@ def test_secret_from_file(tmp_path, _fast_crypto):
                        '--secret-name', 'x',
                        '--from-file', _fwd(tmp_path / 'nope.txt')])
     assert 'unable to read secret value' in res.stderr
+
+
+def test_flagfile_disabled(tmp_path):
+    # face's --flagfile reads arbitrary files and echoes their content to
+    # stderr before any authentication (audit CHAIN-01/02/04/05); the root
+    # Command must keep it disabled on every subcommand.
+    flag_path = tmp_path / 'secret-flags.txt'
+    flag_path.write_text('SENTINEL-PASSPHRASE-TOKEN')
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    res = cc.fail('pprotect version --flagfile %s' % _fwd(flag_path))
+    assert 'unknown flag' in res.stderr.lower()
+    assert 'SENTINEL-PASSPHRASE-TOKEN' not in res.stderr
+    assert 'SENTINEL-PASSPHRASE-TOKEN' not in res.stdout

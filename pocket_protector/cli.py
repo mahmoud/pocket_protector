@@ -143,7 +143,9 @@ def _check_creds(kf, creds):
 
 
 def _get_cmd(prepare=False):
-    cmd = Command(name='pocket_protector', func=None, doc=__doc__)  # func=None means output help
+    # flagfile=False: face's --flagfile reads arbitrary files from argv and
+    # echoes their content to stderr pre-auth (audit CHAIN-01/02/04/05).
+    cmd = Command(name='pocket_protector', func=None, doc=__doc__, flagfile=False)  # func=None means output help
 
     # add flags
     cmd.add('--file', missing='protected.yaml',
