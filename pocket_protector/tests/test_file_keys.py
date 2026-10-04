@@ -371,6 +371,12 @@ def test_v1_kdf_params_bounded(monkeypatch):
     trusted = file_keys._KeyCustodian.from_data(name, data)
     assert trusted.as_data() == data
 
+    # Strict parsing: 0/false do not enable trusting (ENV-BOOL-001).
+    for falsy in ('0', 'false'):
+        monkeypatch.setenv('PPROTECT_TRUST_KDF_PARAMS', falsy)
+        with pytest.raises(file_keys.PPError, match='exceed limits'):
+            file_keys._KeyCustodian.from_data(name, data)
+
     monkeypatch.delenv('PPROTECT_TRUST_KDF_PARAMS')
     raw = (b'\x01'
            + struct.pack('<II', file_keys.KDF_OPSLIMIT_MAX, file_keys.KDF_MEMLIMIT_MAX)
@@ -567,3 +573,20 @@ def test_creds_from_env_missing_vars(monkeypatch):
     creds = file_keys.Creds.from_env()
     assert creds.name == ''
     assert creds.passphrase == ''
+
+
+@pytest.mark.parametrize('value,expected', [
+    ('1', True), ('true', True), ('YES', True), (' Yes ', True),
+    ('0', False), ('false', False), ('no', False), ('', False),
+    ('on', False)])
+def test_env_flag(monkeypatch, value, expected):
+    """_env_flag enables on 1/true/yes only; anything else is False."""
+    monkeypatch.setenv('PPROTECT_TEST_FLAG', value)
+    assert file_keys._env_flag('PPROTECT_TEST_FLAG') is expected
+
+
+def test_env_flag_unset(monkeypatch):
+    """Unset env var yields the default (False)."""
+    monkeypatch.delenv('PPROTECT_TEST_FLAG', raising=False)
+    assert file_keys._env_flag('PPROTECT_TEST_FLAG') is False
+    assert file_keys._env_flag('PPROTECT_TEST_FLAG', default=True) is True

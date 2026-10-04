@@ -82,6 +82,15 @@ KDF_RAW_KEY = 'raw'  # sentinel for raw-key custodians
 OPSLIMIT = KDF_SENSITIVE[0]
 MEMLIMIT = KDF_SENSITIVE[1]
 
+
+def _env_flag(name, default=False):
+    'parse a boolean env var: only 1/true/yes (case-insensitive) enable'
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes')
+
+
 # NOTE: this is a public class since it must be passed in
 @attr.s(frozen=True)
 class Creds(object):
@@ -242,7 +251,7 @@ class _KeyCustodian(object):
                               % (name, version, 49, len(raw)))
             opslimit, memlimit = struct.unpack_from('<II', raw, 1)
             if ((opslimit > KDF_OPSLIMIT_MAX or memlimit > KDF_MEMLIMIT_MAX)
-                    and not os.getenv('PPROTECT_TRUST_KDF_PARAMS')):
+                    and not _env_flag('PPROTECT_TRUST_KDF_PARAMS')):
                 raise PPError('custodian %r stored KDF params exceed limits:'
                               ' opslimit=%r (max %r), memlimit=%r (max %r);'
                               ' set PPROTECT_TRUST_KDF_PARAMS=1 to load anyway'
