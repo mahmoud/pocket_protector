@@ -637,7 +637,7 @@ def list_all_secrets(kf):
 
 
 def list_audit_log(kf):
-    'print a list of actions from the audit log, one per line'
+    'print audit log entries, one per line (informational; git history is the authoritative record)'
     log_list = kf.get_audit_log()
     echo('\n'.join(_sanitize_for_terminal(e) for e in log_list))
     return
