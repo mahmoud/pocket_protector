@@ -622,3 +622,27 @@ def test_schema_rejects_control_char_names():
         mutate(hostile)
         with pytest.raises(schema.SchemaError):
             file_keys._FILE_SCHEMA.validate(hostile)
+
+
+def test_yaml_aliases_rejected():
+    """A protected file using YAML aliases must be refused pre-load."""
+    with pytest.raises(file_keys.PPError, match='alias'):
+        file_keys.KeyFile.from_contents_and_path('x: &a [1]\ny: *a', 'x.yaml')
+
+
+def test_yaml_depth_rejected():
+    """Deeply nested YAML must fail as PPError, not RecursionError."""
+    with pytest.raises(file_keys.PPError, match='nesting'):
+        file_keys.KeyFile.from_contents_and_path('x: ' + '[' * 200 + ']' * 200,
+                                                 'x.yaml')
+
+
+def test_oversized_contents_rejected(tmp_path, monkeypatch):
+    """Both from_contents_and_path and from_file enforce the byte cap."""
+    monkeypatch.setattr(file_keys, 'MAX_FILE_BYTES', 100)
+    with pytest.raises(file_keys.PPError, match='exceed'):
+        file_keys.KeyFile.from_contents_and_path('x' * 101, 'x.yaml')
+    big = tmp_path / 'big.yaml'
+    big.write_text('x' * 101, encoding='utf8')
+    with pytest.raises(file_keys.PPError, match='exceed'):
+        file_keys.KeyFile.from_file(str(big))

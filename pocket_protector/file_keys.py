@@ -75,6 +75,11 @@ KDF_INTERACTIVE = (nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE, nacl.pwhash.argon2
 KDF_OPSLIMIT_MAX = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE  # 4
 KDF_MEMLIMIT_MAX = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE  # 1 GiB
 
+# Load-time ceilings for hostile protected.yaml (audit YAML-DOS-001): the
+# format never uses anchors/aliases and nests at most ~4 levels.
+MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MiB; ~200 bytes per secret gives ~50x headroom
+MAX_YAML_DEPTH = 100
+
 # Raw key passphrase format: P<64 hex chars>P
 # When passphrase has sufficient entropy, KDF can be bypassed entirely.
 _RAW_KEY_RE = re.compile(r'^P([0-9a-f]{64})P$')
@@ -507,12 +512,36 @@ class KeyFile(object):
     def from_file(cls, path):
         'create a new KeyFile from path'
         with open(path, 'rb') as file:
-            contents = file.read().decode('utf8')
-        return cls.from_contents_and_path(contents, path)
+            raw = file.read(MAX_FILE_BYTES + 1)
+        if len(raw) > MAX_FILE_BYTES:
+            raise PPError('protected file at %s exceeds %d bytes; refusing to load'
+                          % (path, MAX_FILE_BYTES))
+        return cls.from_contents_and_path(raw.decode('utf8'), path)
+
+    @classmethod
+    def _check_yaml_safety(cls, contents):
+        'reject YAML features the pocket_protector format never uses, pre-load'
+        depth = 0
+        for event in cls._yaml.parse(contents):
+            if isinstance(event, ruamel.yaml.events.AliasEvent):
+                raise PPError('protected file contains YAML aliases, which the'
+                              ' pocket_protector format never uses; refusing to'
+                              ' load a potentially hostile file')
+            if isinstance(event, ruamel.yaml.events.CollectionStartEvent):
+                depth += 1
+                if depth > MAX_YAML_DEPTH:
+                    raise PPError('protected file nesting exceeds %d levels;'
+                                  ' refusing to load' % MAX_YAML_DEPTH)
+            elif isinstance(event, ruamel.yaml.events.CollectionEndEvent):
+                depth -= 1
 
     @classmethod
     def from_contents_and_path(cls, bytes, path):
         'create a new KeyFile from file contents'
+        if len(bytes) > MAX_FILE_BYTES:
+            raise PPError('protected contents exceed %d bytes; refusing to load'
+                          % MAX_FILE_BYTES)
+        cls._check_yaml_safety(bytes)
         contents = cls._yaml.load(bytes)
         _FILE_SCHEMA.validate(contents)
         log = contents.pop('audit-log')
