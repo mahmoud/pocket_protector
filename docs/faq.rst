@@ -46,9 +46,11 @@ What happens if someone leaves the team?
    use the Python API).
 
 Note that secrets in *old* git history remain encrypted with the old
-keys. If the departing person knew the secret *values* (not just the
-passphrase), you should also rotate the actual secret values with the
-upstream providers.
+keys: rotation only re-keys new commits, so a removed owner can still
+decrypt pre-rotation revisions (``rm-owner`` is a clerical edit, not
+revocation). If the departing person knew the secret *values* (not
+just the passphrase), you should also rotate the actual secret values
+with the upstream providers.
 
 
 Can I use multiple protected files?
