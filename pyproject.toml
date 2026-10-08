@@ -45,7 +45,7 @@ Changelog = "https://github.com/mahmoud/pocket_protector/blob/master/CHANGELOG.m
 
 [dependency-groups]
 dev = [
-    "coverage[toml]>=7",
+    "coverage[toml]>=7.10",  # [run] patch = subprocess/execv
     "pytest>=8",
     "tox>=4",
     "tox-uv>=1",

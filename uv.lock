@@ -346,7 +346,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "coverage", extras = ["toml"], specifier = ">=7" },
+    { name = "coverage", extras = ["toml"], specifier = ">=7.10" },
     { name = "pytest", specifier = ">=8" },
     { name = "tox", specifier = ">=4" },
     { name = "tox-uv", specifier = ">=1" },
