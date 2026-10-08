@@ -60,7 +60,14 @@ testpaths = ["pocket_protector/tests"]
 [tool.coverage.run]
 branch = true
 source = ["pocket_protector"]
-omit = ["pocket_protector/tests/*", "pocket_protector/_vendor/*"]
+# */ prefix: patch=subprocess children run with cwd=tmp_path, where
+# relative patterns no longer match.
+omit = ["*/pocket_protector/tests/*", "*/pocket_protector/_vendor/*"]
+# subprocess: measure `pprotect` CLI subprocesses. execv: save data before
+# `exec` replaces the process; unsupported on Windows (coverage raises), so
+# tox.ini sets COVERAGE_PATCH_EXECV=execv on other platforms only. The
+# fallback repeats "subprocess", which coverage dedupes.
+patch = ["subprocess", "${COVERAGE_PATCH_EXECV-subprocess}"]
 
 [tool.coverage.paths]
 source = [

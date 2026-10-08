@@ -742,5 +742,3 @@ def mw_exit_handler(next_):
         status = 1
 
     sys.exit(status)
-
-    return

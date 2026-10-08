@@ -251,6 +251,49 @@ def test_migrate_owner(_fast_crypto):
         kf2.migrate_owner(bob.name, carol)
 
 
+def test_custodian_ops_touch_only_owned_domains(_fast_crypto):
+    """rm/rekey/migrate act only on the custodian's own domains."""
+    alice = file_keys.Creds('alice@example.com', 'alice-pass')
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    carol = file_keys.Creds('carol@example.com', 'carol-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    for c in (alice, bob, carol):
+        kf = kf.add_key_custodian(c)
+    kf = kf.add_domain('shared', alice.name)
+    kf = kf.add_owner('shared', bob.name, alice)
+    kf = kf.add_domain('alice-only', alice.name)
+    for d in ('shared', 'alice-only'):
+        kf = kf.set_secret(d, 'key', 'val-' + d)
+
+    removed = kf.rm_key_custodian(bob.name)
+    assert removed.get_audit_log()[-1].endswith('(was owner of shared)')
+    assert removed.get_custodian_domains(bob.name) == []
+    assert sorted(removed.get_custodian_domains(alice.name)) == ['alice-only', 'shared']
+
+    new_bob = file_keys.Creds(bob.name, 'new-bob-pass')
+    rekeyed = kf.rekey_custodian(bob, new_bob)
+    assert rekeyed.get_audit_log()[-1].endswith('(updated domains -> shared)')
+    assert rekeyed.decrypt_domain('shared', new_bob)['key'] == 'val-shared'
+    assert rekeyed.decrypt_domain('alice-only', alice)['key'] == 'val-alice-only'
+
+    migrated = kf.migrate_owner(carol.name, alice, domain_names=['alice-only'])
+    assert migrated.get_custodian_domains(carol.name) == ['alice-only']
+    assert migrated.decrypt_domain('alice-only', carol)['key'] == 'val-alice-only'
+
+
+def test_decrypt_as_name_mismatch(_fast_crypto):
+    """A custodian's key refuses creds issued under another name."""
+    alice = file_keys.Creds('alice@example.com', 'shared-pass')
+    mallory = file_keys.Creds('mallory@example.com', 'shared-pass')
+    kc = file_keys._KeyCustodian.from_creds(alice)
+    ciphertext = kc.encrypt_for(b'secret')
+    with pytest.raises(file_keys.PPError, match='name mismatch'):
+        kc.decrypt_as(mallory, ciphertext)
+    assert kc.decrypt_as(alice, ciphertext) == b'secret'
+
+
+
 def test_raw_key_custodian(_fast_crypto):
     """Test raw-key (v2) custodian creation, encrypt/decrypt, and round-trip."""
     from pocket_protector.file_keys import generate_raw_passphrase, is_raw_passphrase, _KeyCustodian

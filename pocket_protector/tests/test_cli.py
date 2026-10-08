@@ -4,6 +4,7 @@ import subprocess
 import shlex
 import sys
 
+import pytest
 import ruamel.yaml
 from face import CommandChecker
 
@@ -630,6 +631,12 @@ def test_decrypt_domain_secret_json(tmp_path, _fast_crypto):
                   '--secret', SECRET_NAME, DOMAIN_NAME])
     data = json.loads(res.stdout)
     assert data == {SECRET_NAME: SECRET_VALUE}
+
+    # explicit json without --secret: the full domain, same as the default
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'other', 'val2'])
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'json', DOMAIN_NAME])
+    assert json.loads(res.stdout) == {SECRET_NAME: SECRET_VALUE, 'other': 'val2'}
+    assert res.stdout == cc.run(['pprotect', 'decrypt-domain', DOMAIN_NAME]).stdout
 
 
 def test_decrypt_domain_secret_shell(tmp_path, _fast_crypto):
@@ -1279,3 +1286,39 @@ def test_rm_owner_warns_about_rotation(tmp_path, _fast_crypto):
     cc.run('pprotect add-owner', input=[DOMAIN_NAME, MH_EMAIL])
     res = cc.run(['pprotect', 'rm-owner'], input=[DOMAIN_NAME, MH_EMAIL])
     assert 'rotate-domain-keys' in res.stderr
+
+
+@pytest.mark.skipif(sys.platform == 'win32' or os.geteuid() == 0,
+                    reason='POSIX permissions; root bypasses them')
+def test_write_readonly_file_errors(tmp_path, _fast_crypto):
+    """Mutating commands refuse a read-only protected file before prompting."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = tmp_path / 'protected.yaml'
+    cc.run('pprotect init --file %s' % _fwd(protected_path),
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    before = protected_path.read_bytes()
+    protected_path.chmod(0o444)
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    res = cc.fail_1(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    assert 'writable' in res.stderr
+    assert 'Adding new domain' not in res.stdout
+    assert protected_path.read_bytes() == before
+
+
+def test_confirm_declined_leaves_file_unchanged(tmp_path, _fast_crypto):
+    """--confirm shows the diff; anything but y aborts with exit 0 and no write."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = tmp_path / 'protected.yaml'
+    cc.run('pprotect init --file %s' % _fwd(protected_path),
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    before = protected_path.read_bytes()
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    res = cc.run(['pprotect', 'add-domain', '--confirm'], input=[DOMAIN_NAME, 'n'])
+    assert 'Changes to be written' in res.stdout
+    assert DOMAIN_NAME in res.stdout  # the diff names the new domain
+    assert 'Aborting' in res.stdout
+    assert protected_path.read_bytes() == before
