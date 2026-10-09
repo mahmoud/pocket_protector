@@ -613,6 +613,19 @@ re-encrypts all secrets and owner key shares. Only current owners
 retain access after rotation. This should be done after any personnel
 change involving someone who had domain access.
 
+**Important:** `rm-owner` alone does not revoke access. Tom's encrypted
+key share remains in every prior git revision of `protected.yaml`, and
+his passphrase still opens it. Rotation only cuts off *new* commits;
+secrets in old history stay decryptable by Tom until their values are
+changed at the upstream providers. rm-owner exists mostly for clerical
+fixups (mistaken adds, reorganization); real offboarding is
+remove → rotate → change secret values at their providers.
+
+Unlike employee onboarding/offboarding in an LDAP-style directory,
+ownership here is a small, stable set: you are not adding and removing
+owners constantly. Treat every removal as a security event, not a
+routine bookkeeping step.
+
 ### Updating and removing secrets
 
 Secrets change over time. When the chat API key is rotated by the

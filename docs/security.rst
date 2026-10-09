@@ -55,6 +55,12 @@ The ``protected.yaml`` file is a self-contained YAML document:
 All state PocketProtector needs to operate is included in this file. The
 file is designed for ``git diff``, ``git blame``, and ``git log``.
 
+``audit-log`` entries are unauthenticated free-form strings: anyone
+with write access to ``protected.yaml`` can add, edit, or remove
+them. ``list-audit-log`` is informational only; VCS history
+(``git log protected.yaml``) is the authoritative record of who
+changed what (AUDIT-INTEG-001).
+
 
 Cryptographic details
 ---------------------
@@ -78,10 +84,20 @@ Cryptographic details
   clamped because that would change the derived key.
 
   For a trusted file that intentionally uses higher costs, set
-  ``PPROTECT_TRUST_KDF_PARAMS=1`` before loading it. Any nonempty value
-  disables these load-time ceilings for both CLI and library callers.
-  Leave it unset for untrusted files, and ensure sufficient memory and CPU
-  are available before deriving a key with trusted higher costs.
+  ``PPROTECT_TRUST_KDF_PARAMS=1`` before loading it. Only ``1``,
+  ``true``, or ``yes`` (case-insensitive) enables trusting; any other
+  value, including ``0`` and ``false``, leaves the ceilings active for
+  both CLI and library callers. Leave it unset for untrusted files, and
+  ensure sufficient memory and CPU are available before deriving a key
+  with trusted higher costs.
+
+* **Salt construction (accepted as-is)**: the effective Argon2id salt
+  for each custodian is ``sha512(salt ‖ custodian name)[:16]`` -- 16
+  bytes, the RFC 9106 salt width, carrying 64 random bits
+  (``os.urandom(8)``) plus the per-custodian name. Salts require
+  uniqueness, not secrecy; this construction is deterministic per
+  custodian name by design, and the audit finding (KDF-SALT-001) is
+  accepted rather than changed.
 
 * **Encryption**: NaCl ``SealedBox`` (Curve25519 public key encryption)
 * **Secret storage**: Each secret is encrypted with the domain's public
@@ -112,13 +128,31 @@ correct custodian passphrase.
 Write access control is delegated to the VCS (git permissions, signed
 commits, branch protection). Neither the file nor individual entries are
 signed, since the security model assumes an attacker does not have write
-access.
+access. Note that write subcommands (``add-secret``, ``update-secret``,
+``rm-secret``, ``rm-domain``, ``rm-owner``) require no credentials by
+design; an attacker with write access can substitute a domain's
+``meta.public-key`` so that secrets added afterwards encrypt to the
+attacker (existing secrets stay safe). See the README FAQ,
+"Securing Write Access" (UNAUTH-MUT-001, PUBKEY-SUB-001).
 
 The file is designed for use alongside VCS tools:
 
 * ``git log protected.yaml`` -- view change history
 * ``git blame protected.yaml`` -- see who changed what
 * Signed commits are a particularly good complement
+
+Supply chain
+------------
+
+Direct runtime dependencies are attrs, PyNaCl, ruamel.yaml, schema, and
+face, plus vendored boltons code (``pocket_protector/_vendor``,
+BSD-licensed, copied verbatim from boltons 25.0.0 -- the exact
+artifact an OSTIF audit reviewed). pocket_protector, face, and boltons
+share a maintainer; downstream users should weigh that trust decision
+(DEP-FACE-001). CI actions are SHA-pinned and the lockfile records
+package hashes. face's ``--flagfile`` (an arbitrary file read,
+pre-auth) is disabled at the root Command; a face upgrade changing
+that default must be caught in review.
 
 
 Passphrase security by domain
@@ -143,6 +177,15 @@ Agent and automation security
 PocketProtector is commonly used in CI/CD pipelines and increasingly
 alongside AI coding agents. In these contexts, secret hygiene matters
 more than usual.
+
+``PPROTECT_ENABLE_DEBUG`` (``1``/``true``/``yes``, case-insensitive)
+drops the CLI into ``pdb.post_mortem()`` on unhandled exceptions. It
+is for interactive debugging only; never enable it in automation, where
+it would hang the process at a debugger prompt.
+
+In-repo agent-instruction files (``.omp/skills/**``) are maintainer
+tooling that runs shell commands at release time. Treat changes to them
+as release-critical in code review (SUPPLY-OMP-001).
 
 Credential injection: safest to weakest
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

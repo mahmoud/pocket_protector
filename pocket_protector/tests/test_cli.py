@@ -4,6 +4,7 @@ import subprocess
 import shlex
 import sys
 
+import pytest
 import ruamel.yaml
 from face import CommandChecker
 
@@ -631,6 +632,12 @@ def test_decrypt_domain_secret_json(tmp_path, _fast_crypto):
     data = json.loads(res.stdout)
     assert data == {SECRET_NAME: SECRET_VALUE}
 
+    # explicit json without --secret: the full domain, same as the default
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'other', 'val2'])
+    res = cc.run(['pprotect', 'decrypt-domain', '--output-format', 'json', DOMAIN_NAME])
+    assert json.loads(res.stdout) == {SECRET_NAME: SECRET_VALUE, 'other': 'val2'}
+    assert res.stdout == cc.run(['pprotect', 'decrypt-domain', DOMAIN_NAME]).stdout
+
 
 def test_decrypt_domain_secret_shell(tmp_path, _fast_crypto):
     """Test --secret with --output-format shell outputs single export line."""
@@ -758,6 +765,52 @@ def test_build_exec_env_collision():
     secrets = {'db-pass': 'val1', 'db_pass': 'val2'}
     with pytest.raises(UsageError, match='collision'):
         cli._build_exec_env(secrets, uppercase=True, base_env={})
+
+
+def test_build_exec_env_reserved_names_refused():
+    import pytest
+    from face import UsageError
+    secrets = {'LD_PRELOAD': '/tmp/evil.so', 'PATH': '/bin/x'}
+    with pytest.raises(UsageError, match='reserved'):
+        cli._build_exec_env(secrets, base_env={})
+    # --uppercase transforms land on the denylist too
+    with pytest.raises(UsageError, match='reserved'):
+        cli._build_exec_env({'ld_preload': '/tmp/evil.so'}, uppercase=True, base_env={})
+
+
+def test_build_exec_env_reserved_names_prefix_escape():
+    """--prefix keeps reserved-looking secret names injectable."""
+    secrets = {'LD_PRELOAD': '/tmp/ok.so'}
+    result = cli._build_exec_env(secrets, prefix='APP', base_env={})
+    assert result['APP_LD_PRELOAD'] == '/tmp/ok.so'
+    assert 'LD_PRELOAD' not in result
+
+
+def test_exec_reserved_name_hostile_file(tmp_path, _fast_crypto):
+    """End-to-end: a hostile protected.yaml secret named LD_PRELOAD must
+    abort exec before the child ever runs."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s --key-type fast' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run(['pprotect', 'add-secret'], input=[DOMAIN_NAME, 'LD_PRELOAD', '/tmp/evil.so'])
+
+    env = dict(os.environ)
+    env['PPROTECT_USER'] = KURT_EMAIL
+    env['PPROTECT_PASSPHRASE'] = KURT_PHRASE
+    result = subprocess.run(
+        ['pprotect', 'exec', '--non-interactive',
+         '--domain', DOMAIN_NAME,
+         '--file', protected_path,
+         '--', sys.executable, '-c', 'print("CHILD-RAN")'],
+        capture_output=True, text=True, env=env, cwd=str(tmp_path))
+    assert result.returncode != 0
+    assert 'reserved' in result.stderr
+    assert 'CHILD-RAN' not in result.stdout
 
 
 def test_transform_secret_name():
@@ -1177,3 +1230,95 @@ def test_secret_from_file(tmp_path, _fast_crypto):
                        '--secret-name', 'x',
                        '--from-file', _fwd(tmp_path / 'nope.txt')])
     assert 'unable to read secret value' in res.stderr
+
+
+def test_flagfile_disabled(tmp_path):
+    # face's --flagfile reads arbitrary files and echoes their content to
+    # stderr before any authentication (audit CHAIN-01/02/04/05); the root
+    # Command must keep it disabled on every subcommand.
+    flag_path = tmp_path / 'secret-flags.txt'
+    flag_path.write_text('SENTINEL-PASSPHRASE-TOKEN')
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    res = cc.fail('pprotect version --flagfile %s' % _fwd(flag_path))
+    assert 'unknown flag' in res.stderr.lower()
+    assert 'SENTINEL-PASSPHRASE-TOKEN' not in res.stderr
+    assert 'SENTINEL-PASSPHRASE-TOKEN' not in res.stdout
+
+
+def test_sanitize_for_terminal():
+    # C0/C1 control chars (incl. ESC, CR, BEL, DEL, OSC) become U+FFFD;
+    # printable text, including the ESC-adjacent bracket text, survives.
+    assert cli._sanitize_for_terminal('a\x1b[2Kb\r\nc\x07d\x7f') == \
+        'a\ufffd[2Kb\ufffd\ufffdc\ufffdd\ufffd'
+    assert cli._sanitize_for_terminal('plain text 123!') == 'plain text 123!'
+    assert cli._sanitize_for_terminal('caf\u00e9 \u4e2d\u6587') == 'caf\u00e9 \u4e2d\u6587'
+
+
+def test_list_audit_log_sanitizes_escapes(tmp_path, _fast_crypto):
+    # YAML double-quoted escapes decode to real control chars after the
+    # reader's raw-byte check; list-audit-log must not render them raw.
+    protected_path = tmp_path / 'protected.yaml'
+    contents = ('key-custodians: {}\n'
+                'audit-log:\n'
+                '- "line1\\x1b[2K\\x1b[1Ahidden"\n')
+    protected_path.write_text(contents, encoding='utf8')
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    res = cc.run(['pprotect', 'list-audit-log', '--file', _fwd(protected_path)])
+    assert '\x1b' not in res.stdout
+    assert '\ufffd' in res.stdout
+    assert 'line1' in res.stdout
+
+
+def test_rm_owner_warns_about_rotation(tmp_path, _fast_crypto):
+    """rm-owner success prints the key-rotation caveat on stderr."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = _fwd(tmp_path / 'protected.yaml')
+    cc.run('pprotect init --file %s' % protected_path,
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    # two custodians; kurt owns the domain and adds MH as second owner
+    cc.run('pprotect add-key-custodian', input=[MH_EMAIL, MH_PHRASE, MH_PHRASE])
+    cc.run(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    cc.run('pprotect add-owner', input=[DOMAIN_NAME, MH_EMAIL])
+    res = cc.run(['pprotect', 'rm-owner'], input=[DOMAIN_NAME, MH_EMAIL])
+    assert 'rotate-domain-keys' in res.stderr
+
+
+@pytest.mark.skipif(sys.platform == 'win32' or os.geteuid() == 0,
+                    reason='POSIX permissions; root bypasses them')
+def test_write_readonly_file_errors(tmp_path, _fast_crypto):
+    """Mutating commands refuse a read-only protected file before prompting."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = tmp_path / 'protected.yaml'
+    cc.run('pprotect init --file %s' % _fwd(protected_path),
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    before = protected_path.read_bytes()
+    protected_path.chmod(0o444)
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    res = cc.fail_1(['pprotect', 'add-domain'], input=[DOMAIN_NAME])
+    assert 'writable' in res.stderr
+    assert 'Adding new domain' not in res.stdout
+    assert protected_path.read_bytes() == before
+
+
+def test_confirm_declined_leaves_file_unchanged(tmp_path, _fast_crypto):
+    """--confirm shows the diff; anything but y aborts with exit 0 and no write."""
+    cmd = cli._get_cmd()
+    cc = CommandChecker(cmd, reraise=True)
+    protected_path = tmp_path / 'protected.yaml'
+    cc.run('pprotect init --file %s' % _fwd(protected_path),
+           input=[KURT_EMAIL, KURT_PHRASE, KURT_PHRASE])
+    before = protected_path.read_bytes()
+    kurt_env = {'PPROTECT_USER': KURT_EMAIL, 'PPROTECT_PASSPHRASE': KURT_PHRASE}
+    cc = CommandChecker(cmd, chdir=str(tmp_path), env=kurt_env, reraise=True)
+    res = cc.run(['pprotect', 'add-domain', '--confirm'], input=[DOMAIN_NAME, 'n'])
+    assert 'Changes to be written' in res.stdout
+    assert DOMAIN_NAME in res.stdout  # the diff names the new domain
+    assert 'Aborting' in res.stdout
+    assert protected_path.read_bytes() == before

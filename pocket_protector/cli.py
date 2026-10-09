@@ -22,6 +22,19 @@ _ANSI_FORE_RED = '\x1b[31m'
 _ANSI_FORE_GREEN = '\x1b[32m'
 _ANSI_RESET_ALL = '\x1b[0m'
 
+_CONTROL_CHAR_RE = re.compile(r'[\x00-\x1f\x7f-\x9f]')
+
+
+def _sanitize_for_terminal(text):
+    """Replace C0/C1 control chars with U+FFFD before terminal display.
+
+    File-sourced strings must not inject terminal escapes (TERM-ESC-001).
+    Replacement, not removal: keeps tampering visible and avoids silent
+    display collisions. face's echo(color=False) does not strip these.
+    """
+    return _CONTROL_CHAR_RE.sub('\ufffd', text)
+
+
 DEFAULT_ENV_PREFIX = 'PPROTECT'
 
 
@@ -143,7 +156,9 @@ def _check_creds(kf, creds):
 
 
 def _get_cmd(prepare=False):
-    cmd = Command(name='pocket_protector', func=None, doc=__doc__)  # func=None means output help
+    # flagfile=False: face's --flagfile reads arbitrary files from argv and
+    # echoes their content to stderr pre-auth (audit CHAIN-01/02/04/05).
+    cmd = Command(name='pocket_protector', func=None, doc=__doc__, flagfile=False)  # func=None means output help
 
     # add flags
     cmd.add('--file', missing='protected.yaml',
@@ -317,7 +332,11 @@ def rm_owner(wkf):
     echo('Removing domain owner.')
     domain_name = prompt('Domain name: ')
     owner_name = prompt('Owner email: ')
-    return wkf.rm_owner(domain_name, owner_name)
+    ret = wkf.rm_owner(domain_name, owner_name)
+    echo.err('Note: the removed owner can still decrypt this domain (from this'
+             ' file revision and all earlier ones) until you run'
+             ' rotate-domain-keys and change the secret values.')
+    return ret
 
 
 def _read_secret_value(from_file):
@@ -485,6 +504,19 @@ _PASSTHROUGH_VARS = ('PATH', 'HOME', 'TERM', 'LANG', 'USER', 'SHELL', 'LOGNAME')
 # Env vars scrubbed from the child process unconditionally
 _SCRUBBED_VARS = ('PPROTECT_PASSPHRASE', 'PPROTECT_USER', 'PPROTECT_ENV_PREFIX')
 
+# Env names a hostile protected.yaml must not be able to set via a secret
+# name (audit EXEC-ENV-001): loader/interpreter variables turn a file
+# write into code execution in the exec'd child. Checked after
+# --prefix/--uppercase transformation, so those remain escape hatches.
+_RESERVED_ENV_EXACT = frozenset([
+    'PATH', 'IFS', 'ENV', 'BASH_ENV', 'NODE_OPTIONS', 'PERL5OPT', 'PERL5LIB'])
+_RESERVED_ENV_PREFIXES = ('LD_', 'DYLD_', 'PYTHON', 'GIT_')
+
+
+def _is_reserved_env_name(name):
+    return (name in _RESERVED_ENV_EXACT
+            or name.startswith(_RESERVED_ENV_PREFIXES))
+
 
 def _transform_secret_name(name, prefix=None, uppercase=False):
     """Apply prefix and/or uppercase transformation to a secret name."""
@@ -515,6 +547,15 @@ def _build_exec_env(decrypted_dict, prefix=None, uppercase=False,
                 'secret name collision after transformation: %r and a prior secret both map to %r'
                 % (name, env_name))
         secret_env[env_name] = value
+
+
+    reserved = sorted(n for n in secret_env if _is_reserved_env_name(n))
+    if reserved:
+        raise UsageError(
+            'refusing to inject secrets as reserved env var names (%s);'
+            ' such names can turn a protected.yaml write into code'
+            ' execution. Use --prefix or --uppercase to transform secret'
+            ' names.' % ', '.join(reserved))
 
     # Build the child environment
     if no_passthrough:
@@ -566,7 +607,7 @@ def list_domains(kf):
     'print a list of domain names, if any'
     domain_names = kf.get_domain_names()
     if domain_names:
-        echo('\n'.join(domain_names))
+        echo('\n'.join(_sanitize_for_terminal(n) for n in domain_names))
     else:
         echo.err('(No domains in protected at %s)' % kf.path)
     return
@@ -591,14 +632,14 @@ def list_all_secrets(kf):
     else:
         for secret_name in sorted(secrets_map):
             domain_names = sorted(set(secrets_map[secret_name]))
-            echo('%s: %s' % (secret_name, ', '.join(domain_names)))
+            echo(_sanitize_for_terminal('%s: %s' % (secret_name, ', '.join(domain_names))))
     return
 
 
 def list_audit_log(kf):
-    'print a list of actions from the audit log, one per line'
+    'print audit log entries, one per line (informational; git history is the authoritative record)'
     log_list = kf.get_audit_log()
-    echo('\n'.join(log_list))
+    echo('\n'.join(_sanitize_for_terminal(e) for e in log_list))
     return
 
 
@@ -610,7 +651,7 @@ def list_user_secrets(kf, creds):
         return
     for domain_name in sorted(owned):
         secrets = kf.get_domain_secret_names(domain_name)
-        echo('%s: %s' % (domain_name, ', '.join(secrets) if secrets else '(no secrets)'))
+        echo(_sanitize_for_terminal('%s: %s' % (domain_name, ', '.join(secrets) if secrets else '(no secrets)')))
     return
 
 
@@ -671,6 +712,7 @@ def mw_write_kf(next_, kf, confirm):
         diff_lines = list(difflib.unified_diff(kf.get_contents().splitlines(),
                                                modified_kf.get_contents().splitlines(),
                                                kf.path + '.old', kf.path + '.new'))
+        diff_lines = [_sanitize_for_terminal(l) for l in diff_lines]
         diff_lines = _get_colorized_lines(diff_lines)
         echo('Changes to be written:\n')
         echo('\n'.join(diff_lines) + '\n')
@@ -691,7 +733,7 @@ def mw_exit_handler(next_):
         try:
             status = next_() or 0
         except PPError as ppe:
-            raise UsageError(ppe.args[0])
+            raise UsageError(_sanitize_for_terminal(ppe.args[0]))
     except KeyboardInterrupt:
         echo('')
         status = 130
@@ -700,5 +742,3 @@ def mw_exit_handler(next_):
         status = 1
 
     sys.exit(status)
-
-    return

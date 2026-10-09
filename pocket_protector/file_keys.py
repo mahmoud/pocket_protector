@@ -20,8 +20,8 @@ import nacl.secret
 import nacl.pwhash
 import schema
 import ruamel.yaml
-from boltons.dictutils import OMD
-from boltons.fileutils import atomic_save
+from ._vendor.dictutils import OMD
+from ._vendor.fileutils import atomic_save
 
 
 _VALID_NAME_RE = re.compile(r"^[A-Za-z][-_A-Za-z0-9]*\Z")
@@ -44,19 +44,21 @@ def _as_d(sub_schema): return _coerce(dict, sub_schema)
 def _as_l(sub_schema): return _coerce(list, sub_schema)
 
 
+_PRINTABLE_NAME_RE = r"^[^\x00-\x1f\x7f-\x9f]+\Z"
+
 _FILE_SCHEMA = schema.Schema(_as_d(
 {
     "audit-log": _as_l([str]),
     "key-custodians": _as_d({
-        schema.Optional(str): _as_d({
+        schema.Optional(schema.Regex(_PRINTABLE_NAME_RE)): _as_d({
             "pwdkm": str,
         }),
     }),
-    schema.Optional(schema.Regex("^(?!meta).*$")): _as_d({
+    schema.Optional(schema.Regex(r"^(?!meta)[^\x00-\x1f\x7f-\x9f]+\Z")): _as_d({
         # allow string names for security domains,
         # but meta is reserved
         "meta": _as_d({
-            "owners": _as_d({str: str}),
+            "owners": _as_d({schema.Optional(schema.Regex(_PRINTABLE_NAME_RE)): str}),
             "public-key": str,
         }),
         schema.Optional(schema.Regex("^secret-[A-Za-z][-_A-Za-z0-9]*$")): str,
@@ -73,6 +75,11 @@ KDF_INTERACTIVE = (nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE, nacl.pwhash.argon2
 KDF_OPSLIMIT_MAX = nacl.pwhash.argon2id.OPSLIMIT_SENSITIVE  # 4
 KDF_MEMLIMIT_MAX = nacl.pwhash.argon2id.MEMLIMIT_SENSITIVE  # 1 GiB
 
+# Load-time ceilings for hostile protected.yaml (audit YAML-DOS-001): the
+# format never uses anchors/aliases and nests at most ~4 levels.
+MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MiB; ~200 bytes per secret gives ~50x headroom
+MAX_YAML_DEPTH = 100
+
 # Raw key passphrase format: P<64 hex chars>P
 # When passphrase has sufficient entropy, KDF can be bypassed entirely.
 _RAW_KEY_RE = re.compile(r'^P([0-9a-f]{64})P$')
@@ -81,6 +88,15 @@ KDF_RAW_KEY = 'raw'  # sentinel for raw-key custodians
 # Keep module-level defaults for backward compat (v0 custodians use these)
 OPSLIMIT = KDF_SENSITIVE[0]
 MEMLIMIT = KDF_SENSITIVE[1]
+
+
+def _env_flag(name, default=False):
+    'parse a boolean env var: only 1/true/yes (case-insensitive) enable'
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ('1', 'true', 'yes')
+
 
 # NOTE: this is a public class since it must be passed in
 @attr.s(frozen=True)
@@ -242,7 +258,7 @@ class _KeyCustodian(object):
                               % (name, version, 49, len(raw)))
             opslimit, memlimit = struct.unpack_from('<II', raw, 1)
             if ((opslimit > KDF_OPSLIMIT_MAX or memlimit > KDF_MEMLIMIT_MAX)
-                    and not os.getenv('PPROTECT_TRUST_KDF_PARAMS')):
+                    and not _env_flag('PPROTECT_TRUST_KDF_PARAMS')):
                 raise PPError('custodian %r stored KDF params exceed limits:'
                               ' opslimit=%r (max %r), memlimit=%r (max %r);'
                               ' set PPROTECT_TRUST_KDF_PARAMS=1 to load anyway'
@@ -496,12 +512,36 @@ class KeyFile(object):
     def from_file(cls, path):
         'create a new KeyFile from path'
         with open(path, 'rb') as file:
-            contents = file.read().decode('utf8')
-        return cls.from_contents_and_path(contents, path)
+            raw = file.read(MAX_FILE_BYTES + 1)
+        if len(raw) > MAX_FILE_BYTES:
+            raise PPError('protected file at %s exceeds %d bytes; refusing to load'
+                          % (path, MAX_FILE_BYTES))
+        return cls.from_contents_and_path(raw.decode('utf8'), path)
+
+    @classmethod
+    def _check_yaml_safety(cls, contents):
+        'reject YAML features the pocket_protector format never uses, pre-load'
+        depth = 0
+        for event in cls._yaml.parse(contents):
+            if isinstance(event, ruamel.yaml.events.AliasEvent):
+                raise PPError('protected file contains YAML aliases, which the'
+                              ' pocket_protector format never uses; refusing to'
+                              ' load a potentially hostile file')
+            if isinstance(event, ruamel.yaml.events.CollectionStartEvent):
+                depth += 1
+                if depth > MAX_YAML_DEPTH:
+                    raise PPError('protected file nesting exceeds %d levels;'
+                                  ' refusing to load' % MAX_YAML_DEPTH)
+            elif isinstance(event, ruamel.yaml.events.CollectionEndEvent):
+                depth -= 1
 
     @classmethod
     def from_contents_and_path(cls, bytes, path):
         'create a new KeyFile from file contents'
+        if len(bytes) > MAX_FILE_BYTES:
+            raise PPError('protected contents exceed %d bytes; refusing to load'
+                          % MAX_FILE_BYTES)
+        cls._check_yaml_safety(bytes)
         contents = cls._yaml.load(bytes)
         _FILE_SCHEMA.validate(contents)
         log = contents.pop('audit-log')

@@ -2,6 +2,8 @@ import tempfile
 
 import pytest
 
+import schema
+
 from pocket_protector import file_keys
 
 
@@ -249,6 +251,49 @@ def test_migrate_owner(_fast_crypto):
         kf2.migrate_owner(bob.name, carol)
 
 
+def test_custodian_ops_touch_only_owned_domains(_fast_crypto):
+    """rm/rekey/migrate act only on the custodian's own domains."""
+    alice = file_keys.Creds('alice@example.com', 'alice-pass')
+    bob = file_keys.Creds('bob@example.com', 'bob-pass')
+    carol = file_keys.Creds('carol@example.com', 'carol-pass')
+    tmp = tempfile.NamedTemporaryFile()
+    kf = file_keys.KeyFile.create(path=tmp.name)
+    for c in (alice, bob, carol):
+        kf = kf.add_key_custodian(c)
+    kf = kf.add_domain('shared', alice.name)
+    kf = kf.add_owner('shared', bob.name, alice)
+    kf = kf.add_domain('alice-only', alice.name)
+    for d in ('shared', 'alice-only'):
+        kf = kf.set_secret(d, 'key', 'val-' + d)
+
+    removed = kf.rm_key_custodian(bob.name)
+    assert removed.get_audit_log()[-1].endswith('(was owner of shared)')
+    assert removed.get_custodian_domains(bob.name) == []
+    assert sorted(removed.get_custodian_domains(alice.name)) == ['alice-only', 'shared']
+
+    new_bob = file_keys.Creds(bob.name, 'new-bob-pass')
+    rekeyed = kf.rekey_custodian(bob, new_bob)
+    assert rekeyed.get_audit_log()[-1].endswith('(updated domains -> shared)')
+    assert rekeyed.decrypt_domain('shared', new_bob)['key'] == 'val-shared'
+    assert rekeyed.decrypt_domain('alice-only', alice)['key'] == 'val-alice-only'
+
+    migrated = kf.migrate_owner(carol.name, alice, domain_names=['alice-only'])
+    assert migrated.get_custodian_domains(carol.name) == ['alice-only']
+    assert migrated.decrypt_domain('alice-only', carol)['key'] == 'val-alice-only'
+
+
+def test_decrypt_as_name_mismatch(_fast_crypto):
+    """A custodian's key refuses creds issued under another name."""
+    alice = file_keys.Creds('alice@example.com', 'shared-pass')
+    mallory = file_keys.Creds('mallory@example.com', 'shared-pass')
+    kc = file_keys._KeyCustodian.from_creds(alice)
+    ciphertext = kc.encrypt_for(b'secret')
+    with pytest.raises(file_keys.PPError, match='name mismatch'):
+        kc.decrypt_as(mallory, ciphertext)
+    assert kc.decrypt_as(alice, ciphertext) == b'secret'
+
+
+
 def test_raw_key_custodian(_fast_crypto):
     """Test raw-key (v2) custodian creation, encrypt/decrypt, and round-trip."""
     from pocket_protector.file_keys import generate_raw_passphrase, is_raw_passphrase, _KeyCustodian
@@ -370,6 +415,12 @@ def test_v1_kdf_params_bounded(monkeypatch):
     monkeypatch.setenv('PPROTECT_TRUST_KDF_PARAMS', '1')
     trusted = file_keys._KeyCustodian.from_data(name, data)
     assert trusted.as_data() == data
+
+    # Strict parsing: 0/false do not enable trusting (ENV-BOOL-001).
+    for falsy in ('0', 'false'):
+        monkeypatch.setenv('PPROTECT_TRUST_KDF_PARAMS', falsy)
+        with pytest.raises(file_keys.PPError, match='exceed limits'):
+            file_keys._KeyCustodian.from_data(name, data)
 
     monkeypatch.delenv('PPROTECT_TRUST_KDF_PARAMS')
     raw = (b'\x01'
@@ -567,3 +618,74 @@ def test_creds_from_env_missing_vars(monkeypatch):
     creds = file_keys.Creds.from_env()
     assert creds.name == ''
     assert creds.passphrase == ''
+
+
+@pytest.mark.parametrize('value,expected', [
+    ('1', True), ('true', True), ('YES', True), (' Yes ', True),
+    ('0', False), ('false', False), ('no', False), ('', False),
+    ('on', False)])
+def test_env_flag(monkeypatch, value, expected):
+    """_env_flag enables on 1/true/yes only; anything else is False."""
+    monkeypatch.setenv('PPROTECT_TEST_FLAG', value)
+    assert file_keys._env_flag('PPROTECT_TEST_FLAG') is expected
+
+
+def test_env_flag_unset(monkeypatch):
+    """Unset env var yields the default (False)."""
+    monkeypatch.delenv('PPROTECT_TEST_FLAG', raising=False)
+    assert file_keys._env_flag('PPROTECT_TEST_FLAG') is False
+    assert file_keys._env_flag('PPROTECT_TEST_FLAG', default=True) is True
+
+
+def test_schema_rejects_control_char_names():
+    """Hostile control-char names (TERM-ESC-001) must fail at load."""
+    valid = {
+        'audit-log': [],
+        'key-custodians': {
+            'alice@example.com': {'pwdkm': 'AAAA'}},
+        'my-domain': {
+            'meta': {
+                'owners': {'alice@example.com': 'alice@example.com'},
+                'public-key': 'AAAA'},
+            'secret-token': 'BBBB'},
+    }
+    file_keys._FILE_SCHEMA.validate(valid)  # printable corpus passes
+
+    for mutate in [
+            lambda d: d['key-custodians'].__setitem__('a\x1bb', {'pwdkm': 'AAAA'}),
+            lambda d: d.__setitem__('de\x1bv', d.pop('my-domain')),
+            lambda d: d['my-domain']['meta']['owners'].__setitem__(
+                'ow\x1bner', 'alice@example.com')]:
+        hostile = {k: (dict(v) if isinstance(v, dict) else list(v))
+                   for k, v in valid.items()}
+        hostile['my-domain'] = {
+            'meta': {'owners': dict(valid['my-domain']['meta']['owners']),
+                     'public-key': 'AAAA'},
+            'secret-token': 'BBBB'}
+        mutate(hostile)
+        with pytest.raises(schema.SchemaError):
+            file_keys._FILE_SCHEMA.validate(hostile)
+
+
+def test_yaml_aliases_rejected():
+    """A protected file using YAML aliases must be refused pre-load."""
+    with pytest.raises(file_keys.PPError, match='alias'):
+        file_keys.KeyFile.from_contents_and_path('x: &a [1]\ny: *a', 'x.yaml')
+
+
+def test_yaml_depth_rejected():
+    """Deeply nested YAML must fail as PPError, not RecursionError."""
+    with pytest.raises(file_keys.PPError, match='nesting'):
+        file_keys.KeyFile.from_contents_and_path('x: ' + '[' * 200 + ']' * 200,
+                                                 'x.yaml')
+
+
+def test_oversized_contents_rejected(tmp_path, monkeypatch):
+    """Both from_contents_and_path and from_file enforce the byte cap."""
+    monkeypatch.setattr(file_keys, 'MAX_FILE_BYTES', 100)
+    with pytest.raises(file_keys.PPError, match='exceed'):
+        file_keys.KeyFile.from_contents_and_path('x' * 101, 'x.yaml')
+    big = tmp_path / 'big.yaml'
+    big.write_text('x' * 101, encoding='utf8')
+    with pytest.raises(file_keys.PPError, match='exceed'):
+        file_keys.KeyFile.from_file(str(big))
