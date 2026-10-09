@@ -9,6 +9,30 @@ scheme (`YY.MINOR.MICRO`).
 Check this page when upgrading, we strive to keep the updates
 summarized and readable.
 
+26.4.3
+------
+*(October 8, 2026)*
+
+* `exec` refuses to inject secrets whose names would set loader or
+  interpreter variables (`PATH`, `IFS`, `ENV`, `BASH_ENV`, `NODE_OPTIONS`,
+  `PERL5OPT`, `PERL5LIB`, `LD_*`, `DYLD_*`, `PYTHON*`, `GIT_*`); use
+  `--prefix` or `--uppercase` to inject them under another name (EXEC-ENV-001).
+* Replace terminal control characters with U+FFFD in listings, audit log,
+  `--confirm` diffs, and error messages, so a hostile protected file cannot
+  inject terminal escapes (TERM-ESC-001, CHAIN-03).
+* Reject protected files over 10 MiB, with YAML aliases, nested deeper than
+  100 levels, or with control characters in custodian or domain names
+  (YAML-DOS-001).
+* Disable face's undocumented `--flagfile`, which read arbitrary files before
+  authentication (CHAIN-01/02/04/05).
+* Boolean env vars (`PPROTECT_TRUST_KDF_PARAMS`, `PPROTECT_ENABLE_DEBUG`)
+  only enable on `1`, `true`, or `yes` (ENV-BOOL-001).
+* `rm-owner` warns that a removed owner can still decrypt until domain keys
+  are rotated and secret values changed (RM-OWNER-001).
+* Vendor the boltons modules in use; `boltons` is no longer a direct
+  dependency (DEP-FACE-001).
+* Document audit-resolved trust assumptions in the security docs.
+
 26.4.2
 ------
 *(September 7, 2026)*
